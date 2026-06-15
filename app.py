@@ -188,31 +188,39 @@ def youtube_banner():
 
 
 def spec_banner():
+    inner = (
+        '<div style="display:flex; align-items:center; justify-content:space-between; '
+        'gap:16px; flex-wrap:wrap; background:#10141c; border-radius:16px; padding:20px 26px;">'
+        '<div style="text-align:left;">'
+        '<div style="color:#ffffff !important; font-size:18px; font-weight:800; line-height:1.35;">'
+        '📊 26년 상반기 현대차 서류합격 스펙분석</div>'
+        '<div style="color:#aeb6c4 !important; font-size:13.5px; margin-top:4px;">'
+        '합격자 스펙 데이터로 내 위치 확인하기</div></div>'
+        '<div style="background:#2f6fed; color:#ffffff !important; font-weight:800; font-size:15px; '
+        'padding:12px 22px; border-radius:10px; white-space:nowrap;">분석하러 가기 &rarr;</div></div>'
+    )
     st.markdown(
         f'<a href="{SPEC_URL}" target="_blank" rel="noopener" '
-        f'style="display:flex; align-items:center; justify-content:center; gap:10px; '
-        f'text-decoration:none !important; background:#1c4fd6; border-radius:14px; '
-        f'padding:18px 22px; margin:4px 0 8px; text-align:center;">'
-        f'<span style="font-size:20px;">📊</span>'
-        f'<span style="color:#ffffff !important; font-size:17px; font-weight:800; line-height:1.35;">'
-        f'26년 상반기 현대차 서류합격 스펙분석 하러가기</span>'
-        f'<span style="color:#ffffff !important; font-size:18px; font-weight:800;">&rarr;</span></a>',
+        f'style="display:block; text-decoration:none !important; margin:4px 0 10px;">{inner}</a>',
         unsafe_allow_html=True,
     )
 
 
 def consulting_banner():
+    inner = (
+        '<div style="display:flex; align-items:center; justify-content:space-between; '
+        'gap:16px; flex-wrap:wrap; background:#10141c; border-radius:16px; padding:22px 26px;">'
+        '<div style="text-align:left;">'
+        '<div style="color:#ffffff !important; font-size:19px; font-weight:800; line-height:1.35;">'
+        '자소서 첨삭 · 모의면접 1:1 컨설팅</div>'
+        '<div style="color:#aeb6c4 !important; font-size:14px; margin-top:4px;">'
+        '현직자 멘토와 함께 합격까지 — 잡앤유 컨설팅 바로가기</div></div>'
+        '<div style="background:#2f6fed; color:#ffffff !important; font-weight:800; font-size:15px; '
+        'padding:13px 22px; border-radius:10px; white-space:nowrap;">상담 신청하기 &rarr;</div></div>'
+    )
     st.markdown(
         f'<a href="{CONSULT_URL}" target="_blank" rel="noopener" '
-        f'style="display:block; text-decoration:none !important; background:#10141c; '
-        f'border-radius:16px; padding:26px 24px; text-align:center; margin:8px 0 4px;">'
-        f'<div style="color:#ffffff !important; font-size:19px; font-weight:800; line-height:1.35;">'
-        f'자소서 첨삭 · 모의면접 1:1 컨설팅</div>'
-        f'<div style="color:#aeb6c4 !important; font-size:14px; margin:6px 0 16px;">'
-        f'현직자 멘토와 함께 합격까지 — 잡앤유 컨설팅</div>'
-        f'<span style="display:inline-block; background:#2f6fed; color:#ffffff !important; '
-        f'font-weight:800; font-size:15px; padding:13px 26px; border-radius:10px;">'
-        f'상담 신청하기 &rarr;</span></a>',
+        f'style="display:block; text-decoration:none !important; margin:8px 0 4px;">{inner}</a>',
         unsafe_allow_html=True,
     )
 
