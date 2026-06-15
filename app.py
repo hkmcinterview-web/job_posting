@@ -15,6 +15,7 @@ import streamlit as st
 PAGE_TITLE = "잡앤유 자동차산업 채용공고 아카이브"
 DATA_FILE = Path(__file__).parent / "data.json"
 CONSULT_URL = "https://litt.ly/jobnyou"
+SPEC_URL = "https://spec-dashboard-6bmjdppkw4ayr2w5q85gky.streamlit.app/"
 YT_CHANNEL = "https://www.youtube.com/@잡앤유"
 VIDEOS = [
     ("wicrZql_1JA", "현대자동차 서류합격을 원한다면 이렇게 써보세요! (합격자소서 분석 · 품질/구매/생기)"),
@@ -173,23 +174,45 @@ def youtube_banner():
         url = f"https://youtu.be/{vid}"
         thumb = f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
         cards.append(
-            f'<a class="yt-card" href="{url}" target="_blank" rel="noopener">'
-            f'<div class="yt-thumb"><img src="{thumb}" alt=""><span class="yt-play">▶</span></div>'
-            f'<div class="yt-title">{_html.escape(title)}</div></a>'
+            f'<a class="yt-card" href="{url}" target="_blank" rel="noopener" '
+            f'style="text-decoration:none !important;">'
+            f'<div class="yt-thumb"><img src="{thumb}" alt=""><span class="yt-play">&#9654;</span></div>'
+            f'<div style="padding:10px 12px 12px; font-size:13.5px; font-weight:600; '
+            f'line-height:1.45; color:#222 !important;">{_html.escape(title)}</div></a>'
         )
     st.markdown(
-        f'<div class="yt-wrap"><div class="yt-head">▶ 잡앤유 유튜브 — 자동차산업 취업 노하우</div>'
+        f'<div class="yt-wrap"><div class="yt-head">&#9654; 잡앤유 유튜브 — 자동차산업 취업 노하우</div>'
         f'<div class="yt-grid">{"".join(cards)}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def spec_banner():
+    st.markdown(
+        f'<a href="{SPEC_URL}" target="_blank" rel="noopener" '
+        f'style="display:flex; align-items:center; justify-content:center; gap:10px; '
+        f'text-decoration:none !important; background:#1c4fd6; border-radius:14px; '
+        f'padding:18px 22px; margin:4px 0 8px; text-align:center;">'
+        f'<span style="font-size:20px;">📊</span>'
+        f'<span style="color:#ffffff !important; font-size:17px; font-weight:800; line-height:1.35;">'
+        f'26년 상반기 현대차 서류합격 스펙분석 하러가기</span>'
+        f'<span style="color:#ffffff !important; font-size:18px; font-weight:800;">&rarr;</span></a>',
         unsafe_allow_html=True,
     )
 
 
 def consulting_banner():
     st.markdown(
-        f'<a class="cta" href="{CONSULT_URL}" target="_blank" rel="noopener">'
-        f'<div><div class="cta-t">자소서 첨삭 · 모의면접 1:1 컨설팅</div>'
-        f'<div class="cta-s">현직자 멘토와 함께 합격까지 — 잡앤유 컨설팅 바로가기</div></div>'
-        f'<div class="cta-btn">상담 신청하기 →</div></a>',
+        f'<a href="{CONSULT_URL}" target="_blank" rel="noopener" '
+        f'style="display:block; text-decoration:none !important; background:#10141c; '
+        f'border-radius:16px; padding:26px 24px; text-align:center; margin:8px 0 4px;">'
+        f'<div style="color:#ffffff !important; font-size:19px; font-weight:800; line-height:1.35;">'
+        f'자소서 첨삭 · 모의면접 1:1 컨설팅</div>'
+        f'<div style="color:#aeb6c4 !important; font-size:14px; margin:6px 0 16px;">'
+        f'현직자 멘토와 함께 합격까지 — 잡앤유 컨설팅</div>'
+        f'<span style="display:inline-block; background:#2f6fed; color:#ffffff !important; '
+        f'font-weight:800; font-size:15px; padding:13px 26px; border-radius:10px;">'
+        f'상담 신청하기 &rarr;</span></a>',
         unsafe_allow_html=True,
     )
 
@@ -198,6 +221,8 @@ def consulting_banner():
 st.markdown(CSS, unsafe_allow_html=True)
 st.title("🚗 " + PAGE_TITLE)
 st.caption("자동차산업 채용공고를 기업별로 모아 보관합니다. 마감 후에도 직무기술서를 다시 볼 수 있어요.")
+
+spec_banner()
 
 df = load_data()
 if df.empty:
