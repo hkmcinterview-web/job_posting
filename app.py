@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 PAGE_TITLE = "잡앤유 자동차산업 채용공고 아카이브"
 DATA_FILE = Path(__file__).parent / "data.json"
@@ -168,6 +169,11 @@ def render_posting(row):
                 unsafe_allow_html=True)
 
 
+BODY_CSS = (
+    "<style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}</style>"
+)
+
+
 def youtube_banner():
     cards = []
     for vid, title in VIDEOS:
@@ -188,41 +194,17 @@ def youtube_banner():
 
 
 def spec_banner():
-    inner = (
-        '<div style="display:flex; align-items:center; justify-content:space-between; '
-        'gap:16px; flex-wrap:wrap; background:#10141c; border-radius:16px; padding:20px 26px;">'
-        '<div style="text-align:left;">'
-        '<div style="color:#ffffff !important; font-size:18px; font-weight:800; line-height:1.35;">'
-        '📊 26년 상반기 현대차 서류합격 스펙분석</div>'
-        '<div style="color:#aeb6c4 !important; font-size:13.5px; margin-top:4px;">'
-        '합격자 스펙 데이터로 내 위치 확인하기</div></div>'
-        '<div style="background:#2f6fed; color:#ffffff !important; font-weight:800; font-size:15px; '
-        'padding:12px 22px; border-radius:10px; white-space:nowrap;">분석하러 가기 &rarr;</div></div>'
+    html = (
+        '''%s<a href="%s" target="_blank" rel="noopener" style="display:flex; align-items:center; justify-content:space-between; gap:14px; background:#10141c; border-radius:16px; padding:18px 24px; text-decoration:none;"><div><div style="color:#ffffff; font-size:17px; font-weight:700; line-height:1.35;">📊 26년 상반기 현대차 서류합격 스펙분석</div><div style="color:#aeb6c4; font-size:13px; margin-top:3px;">합격자 스펙 데이터로 내 위치 확인하기</div></div><div style="background:#2f6fed; color:#ffffff; font-weight:700; font-size:14.5px; padding:11px 20px; border-radius:10px; white-space:nowrap; flex-shrink:0;">분석하러 가기 &rarr;</div></a>''' % (BODY_CSS, SPEC_URL)
     )
-    st.markdown(
-        f'<a href="{SPEC_URL}" target="_blank" rel="noopener" '
-        f'style="display:block; text-decoration:none !important; margin:4px 0 10px;">{inner}</a>',
-        unsafe_allow_html=True,
-    )
+    components.html(html, height=104)
 
 
 def consulting_banner():
-    inner = (
-        '<div style="display:flex; align-items:center; justify-content:space-between; '
-        'gap:16px; flex-wrap:wrap; background:#10141c; border-radius:16px; padding:22px 26px;">'
-        '<div style="text-align:left;">'
-        '<div style="color:#ffffff !important; font-size:19px; font-weight:800; line-height:1.35;">'
-        '자소서 첨삭 · 모의면접 1:1 컨설팅</div>'
-        '<div style="color:#aeb6c4 !important; font-size:14px; margin-top:4px;">'
-        '현직자 멘토와 함께 합격까지 — 잡앤유 컨설팅 바로가기</div></div>'
-        '<div style="background:#2f6fed; color:#ffffff !important; font-weight:800; font-size:15px; '
-        'padding:13px 22px; border-radius:10px; white-space:nowrap;">상담 신청하기 &rarr;</div></div>'
+    html = (
+        '''%s<a href="%s" target="_blank" rel="noopener" style="display:flex; align-items:center; justify-content:space-between; gap:14px; background:#10141c; border-radius:16px; padding:20px 24px; text-decoration:none;"><div><div style="color:#ffffff; font-size:18px; font-weight:700; line-height:1.35;">자소서 첨삭 · 모의면접 1:1 컨설팅</div><div style="color:#aeb6c4; font-size:13.5px; margin-top:4px;">현직자 멘토와 함께 합격까지 — 잡앤유 컨설팅 바로가기</div></div><div style="background:#2f6fed; color:#ffffff; font-weight:700; font-size:15px; padding:12px 22px; border-radius:10px; white-space:nowrap; flex-shrink:0;">상담 신청하기 &rarr;</div></a>''' % (BODY_CSS, CONSULT_URL)
     )
-    st.markdown(
-        f'<a href="{CONSULT_URL}" target="_blank" rel="noopener" '
-        f'style="display:block; text-decoration:none !important; margin:8px 0 4px;">{inner}</a>',
-        unsafe_allow_html=True,
-    )
+    components.html(html, height=110)
 
 
 # ── 화면 ─────────────────────────────────────────────────────
