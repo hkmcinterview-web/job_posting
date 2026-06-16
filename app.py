@@ -32,8 +32,8 @@ st.set_page_config(page_title=PAGE_TITLE, page_icon="🚗", layout="wide")
 CSS = """
 <style>
 .block-container {max-width: 1120px; padding-top: 2.0rem;}
-[data-testid="stVerticalBlock"]{gap:0.55rem !important;}
-.apptitle {font-size:clamp(15px,4.5vw,27px); font-weight:800; color:#10141c; line-height:1.4; margin:2px 0 6px; padding:2px 0;}
+[data-testid="stVerticalBlock"]{gap:0.35rem !important;}
+h1 {font-size:clamp(18px,4.6vw,30px) !important; line-height:1.3 !important; padding:0.2rem 0 0.4rem !important;}
 .metrics {display:flex; gap:8px; margin:2px 0 8px;}
 .metrics .m {flex:1; background:#f1f4f8; border-radius:10px; padding:10px 6px; text-align:center;}
 .metrics .ml {font-size:12px; color:#5b6472; margin-bottom:3px;}
@@ -211,69 +211,69 @@ def youtube_banner():
 def spec_banner():
     html = (
         "<style>"
-        "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}"
+        "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}.mbr{display:none;}"
         "a.b{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#10141c;"
-        "border-radius:16px;padding:13px 22px;text-decoration:none;}"
+        "border-radius:16px;padding:12px 22px;text-decoration:none;}"
         ".tx{min-width:0;}"
         ".t{color:#fff;font-size:17px;font-weight:700;line-height:1.35;}"
         ".s{color:#aeb6c4;font-size:13px;margin-top:3px;}"
         ".btn{background:#2f6fed;color:#fff;font-weight:700;font-size:14px;padding:11px 18px;"
         "border-radius:10px;white-space:nowrap;flex-shrink:0;}"
-        "@media(max-width:520px){.t{font-size:14px}.s{font-size:11px}.btn{font-size:12px;padding:9px 13px}a.b{padding:13px 15px;gap:9px}}"
+        "@media(max-width:520px){.t{font-size:14px}.s{font-size:11px}.btn{font-size:12px;padding:9px 13px}a.b{padding:13px 15px;gap:9px}.mbr{display:inline}}"
         "</style>"
         '<a class="b" href="%s" target="_blank" rel="noopener">'
         '<div class="tx"><div class="t">📊 26년 상반기 현대차 서류합격 스펙분석</div>'
         '<div class="s">합격자 스펙 데이터로 내 위치 확인하기</div></div>'
         '<div class="btn">분석하러 가기 &rarr;</div></a>'
     ) % SPEC_URL
-    components.html(html, height=92)
+    components.html(html, height=82)
 
 
 def kakao_banner():
     html = (
         "<style>"
-        "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}"
+        "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}.mbr{display:none;}"
         "a.b{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#FEE500;"
-        "border-radius:16px;padding:13px 22px;text-decoration:none;}"
+        "border-radius:16px;padding:12px 22px;text-decoration:none;}"
         ".tx{min-width:0;}"
         ".t{color:#3c1e1e;font-size:17px;font-weight:800;line-height:1.35;}"
         ".s{color:#6b531e;font-size:13px;margin-top:3px;}"
         ".btn{background:#3c1e1e;color:#fee500;font-weight:800;font-size:14px;padding:11px 18px;"
         "border-radius:10px;white-space:nowrap;flex-shrink:0;}"
-        "@media(max-width:520px){.t{font-size:14px}.s{font-size:11px}.btn{font-size:12px;padding:9px 13px}a.b{padding:13px 15px;gap:9px}}"
+        "@media(max-width:520px){.t{font-size:14px}.s{font-size:11px}.btn{font-size:12px;padding:9px 13px}a.b{padding:13px 15px;gap:9px}.mbr{display:inline}}"
         "</style>"
         '<a class="b" href="%s" target="_blank" rel="noopener">'
-        '<div class="tx"><div class="t">\U0001f4ac 잡앤유 멘토님들과 함께 무료로 취업상담하기</div>'
+        '<div class="tx"><div class="t">\U0001f4ac 잡앤유 멘토님들과 함께<br class="mbr">무료로 취업상담하기</div>'
         '<div class="s">카카오톡 채널로 편하게 질문하세요</div></div>'
         '<div class="btn">카톡 상담 &rarr;</div></a>'
     ) % KAKAO_URL
-    components.html(html, height=100)
+    components.html(html, height=98)
 
 
 def consulting_banner():
     html = (
         "<style>"
-        "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}"
+        "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}.mbr{display:none;}"
         "a.b{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#10141c;"
-        "border-radius:16px;padding:15px 22px;text-decoration:none;}"
+        "border-radius:16px;padding:13px 22px;text-decoration:none;}"
         ".tx{min-width:0;}"
         ".t{color:#fff;font-size:18px;font-weight:700;line-height:1.35;}"
         ".s{color:#aeb6c4;font-size:13.5px;margin-top:4px;}"
         ".btn{background:#2f6fed;color:#fff;font-weight:700;font-size:14.5px;padding:12px 20px;"
         "border-radius:10px;white-space:nowrap;flex-shrink:0;}"
-        "@media(max-width:520px){.t{font-size:15px}.s{font-size:11.5px}.btn{font-size:12.5px;padding:10px 14px}a.b{padding:14px 16px;gap:9px}}"
+        "@media(max-width:520px){.t{font-size:15px}.s{font-size:11.5px}.btn{font-size:12.5px;padding:10px 14px}a.b{padding:14px 16px;gap:9px}.mbr{display:inline}}"
         "</style>"
         '<a class="b" href="%s" target="_blank" rel="noopener">'
-        '<div class="tx"><div class="t">자소서 첨삭 · 모의면접 1:1 컨설팅</div>'
+        '<div class="tx"><div class="t">자소서 첨삭 · 모의면접<br class="mbr">1:1 컨설팅</div>'
         '<div class="s">현직자 멘토와 함께 합격까지 — 잡앤유 컨설팅 바로가기</div></div>'
         '<div class="btn">상담 신청하기 &rarr;</div></a>'
     ) % CONSULT_URL
-    components.html(html, height=102)
+    components.html(html, height=108)
 
 
 # ── 화면 ─────────────────────────────────────────────────────
 st.markdown(CSS, unsafe_allow_html=True)
-st.markdown('<div class="apptitle">🚗 ' + PAGE_TITLE + '</div>', unsafe_allow_html=True)
+st.title("🚗 " + PAGE_TITLE)
 st.caption("자동차산업 채용공고를 기업별로 모아 보관합니다. 마감 후에도 직무기술서를 다시 볼 수 있어요.")
 
 spec_banner()
