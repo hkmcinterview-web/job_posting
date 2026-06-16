@@ -133,11 +133,14 @@ def body_to_html(body: str) -> str:
         if not opened:
             out.append('<div class="sec">')
             opened = True
-        if s.startswith("- "):
-            listbuf.append(s[2:].strip())
+        if s.startswith("■"):
+            flush()
+            out.append(f'<div class="subhead">{_html.escape(s.lstrip("■ ").strip())}</div>')
         elif s.startswith("["):
             flush()
             out.append(f'<div class="subhead">{_html.escape(s)}</div>')
+        elif s[:1] in "-·•－●▪" or s.startswith("- "):
+            listbuf.append(s.lstrip("-·•－●▪ 　").strip())
         elif s.startswith("※"):
             flush()
             out.append(f'<div class="note">{_html.escape(s)}</div>')
