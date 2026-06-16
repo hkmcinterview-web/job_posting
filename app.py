@@ -31,9 +31,9 @@ st.set_page_config(page_title=PAGE_TITLE, page_icon="🚗", layout="wide")
 
 CSS = """
 <style>
-.block-container {max-width: 1120px; padding-top: 2.0rem;}
+.block-container {max-width: 1120px; padding-top: 3rem;}
 [data-testid="stVerticalBlock"]{gap:0.35rem !important;}
-h1 {font-size:clamp(18px,4.6vw,30px) !important; line-height:1.3 !important; padding:0.2rem 0 0.4rem !important;}
+h1 {font-size:clamp(16px,4.6vw,30px) !important; overflow:visible !important;}
 .metrics {display:flex; gap:8px; margin:2px 0 8px;}
 .metrics .m {flex:1; background:#f1f4f8; border-radius:10px; padding:10px 6px; text-align:center;}
 .metrics .ml {font-size:12px; color:#5b6472; margin-bottom:3px;}
