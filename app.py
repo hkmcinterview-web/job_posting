@@ -31,6 +31,11 @@ st.set_page_config(page_title=PAGE_TITLE, page_icon="🚗", layout="wide")
 CSS = """
 <style>
 .block-container {max-width: 1120px; padding-top: 2.2rem;}
+.apptitle {font-size:27px; font-weight:800; color:#10141c; line-height:1.3; margin:2px 0 6px;}
+.metrics {display:flex; gap:8px; margin:2px 0 8px;}
+.metrics .m {flex:1; background:#f1f4f8; border-radius:10px; padding:10px 6px; text-align:center;}
+.metrics .ml {font-size:12px; color:#5b6472; margin-bottom:3px;}
+.metrics .mv {font-size:20px; font-weight:800; color:#10141c;}
 /* 상세 카드 */
 .job-card {background:#fff; border:1px solid #e7e9ee; border-radius:16px;
   padding:30px 34px; box-shadow:0 2px 14px rgba(20,30,60,.06);
@@ -73,16 +78,20 @@ CSS = """
 .cta-btn {background:#2f6fed; color:#fff; font-weight:800; font-size:15px; padding:13px 22px; border-radius:10px; white-space:nowrap;}
 /* 모바일 */
 @media (max-width:640px){
-  .block-container {padding-top:1.1rem;}
-  h1 {font-size:22px !important; line-height:1.25 !important;}
+  .block-container {padding-top:1.0rem;}
+  .apptitle {font-size:16px !important; white-space:nowrap;}
+  .metrics .mv {font-size:16px;}
+  .metrics .ml {font-size:10px;}
+  .metrics .m {padding:8px 4px;}
   .job-card {padding:18px 15px; font-size:15px;}
   .job-card .title {font-size:20px;}
-  .yt-wrap {padding:12px 12px;}
+  .yt-wrap {padding:12px 10px;}
   .yt-head {font-size:12.5px; margin-bottom:9px;}
   .yt-grid {gap:6px;}
-  .yt-title {font-size:11px; padding:7px 7px 9px; line-height:1.35;}
-  .yt-play {width:30px; height:30px; font-size:13px;}
+  .yt-title {display:none;}
+  .yt-play {width:34px; height:34px; font-size:15px;}
 }
+@media (max-width:380px){ .apptitle {font-size:14px !important;} }
 </style>
 """
 
@@ -243,7 +252,7 @@ def consulting_banner():
 
 # ── 화면 ─────────────────────────────────────────────────────
 st.markdown(CSS, unsafe_allow_html=True)
-st.title("🚗 " + PAGE_TITLE)
+st.markdown('<div class="apptitle">🚗 ' + PAGE_TITLE + '</div>', unsafe_allow_html=True)
 st.caption("자동차산업 채용공고를 기업별로 모아 보관합니다. 마감 후에도 직무기술서를 다시 볼 수 있어요.")
 
 spec_banner()
@@ -253,11 +262,13 @@ if df.empty:
     st.warning("data.json 을 찾을 수 없습니다. app.py 와 같은 폴더에 data.json 을 두세요.")
     st.stop()
 
-c1, c2, c3 = st.columns(3)
-c1.metric("전체 공고", f"{len(df)}건")
-c2.metric("기업 수", f"{df['company'].nunique()}곳")
 imminent = int(df["D-day"].str.match(r"D-([0-7])$").fillna(False).sum())
-c3.metric("마감 임박(7일 이내)", f"{imminent}건")
+st.markdown(
+    f'<div class="metrics">'
+    f'<div class="m"><div class="ml">전체 공고</div><div class="mv">{len(df)}건</div></div>'
+    f'<div class="m"><div class="ml">기업 수</div><div class="mv">{df["company"].nunique()}곳</div></div>'
+    f'<div class="m"><div class="ml">마감 임박(7일)</div><div class="mv">{imminent}건</div></div>'
+    f'</div>', unsafe_allow_html=True)
 
 st.divider()
 
