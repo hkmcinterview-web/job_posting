@@ -17,6 +17,7 @@ PAGE_TITLE = "잡앤유 자동차산업 채용공고 아카이브"
 DATA_FILE = Path(__file__).parent / "data.json"
 CONSULT_URL = "https://litt.ly/jobnyou"
 SPEC_URL = "https://spec-dashboard-6bmjdppkw4ayr2w5q85gky.streamlit.app/"
+KAKAO_URL = "https://pf.kakao.com/_DyxgxeG"
 YT_CHANNEL = "https://www.youtube.com/@잡앤유"
 VIDEOS = [
     ("wicrZql_1JA", "현대자동차 서류합격을 원한다면 이렇게 써보세요! (합격자소서 분석 · 품질/구매/생기)"),
@@ -31,7 +32,7 @@ st.set_page_config(page_title=PAGE_TITLE, page_icon="🚗", layout="wide")
 CSS = """
 <style>
 .block-container {max-width: 1120px; padding-top: 2.2rem;}
-.apptitle {font-size:27px; font-weight:800; color:#10141c; line-height:1.3; margin:2px 0 6px;}
+.apptitle {font-size:clamp(15px,4.5vw,27px); font-weight:800; color:#10141c; line-height:1.3; margin:2px 0 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .metrics {display:flex; gap:8px; margin:2px 0 8px;}
 .metrics .m {flex:1; background:#f1f4f8; border-radius:10px; padding:10px 6px; text-align:center;}
 .metrics .ml {font-size:12px; color:#5b6472; margin-bottom:3px;}
@@ -79,7 +80,6 @@ CSS = """
 /* 모바일 */
 @media (max-width:640px){
   .block-container {padding-top:1.0rem;}
-  .apptitle {font-size:16px !important; white-space:nowrap;}
   .metrics .mv {font-size:16px;}
   .metrics .ml {font-size:10px;}
   .metrics .m {padding:8px 4px;}
@@ -91,7 +91,6 @@ CSS = """
   .yt-title {display:none;}
   .yt-play {width:34px; height:34px; font-size:15px;}
 }
-@media (max-width:380px){ .apptitle {font-size:14px !important;} }
 </style>
 """
 
@@ -177,7 +176,7 @@ def render_posting(row):
     if row.get("location"):
         badges.append(f'<span class="badge loc">📍 {_html.escape(str(row["location"]))}</span>')
     if row.get("deadline"):
-        badges.append(f'<span class="badge dday">🗓 마감 {_html.escape(str(row["deadline"]))} ({row.get("D-day","")})</span>')
+        badges.append(f'<span class="badge dday">🗓 마감 {_html.escape(str(row["deadline"]))}</span>')
     head = (f'<div class="company">{comp}</div><div class="title">{title}</div>'
             f'<div class="badges">{"".join(badges)}</div><hr/>')
     st.markdown(f'<div class="job-card">{head}{body_to_html(row.get("body",""))}</div>',
@@ -198,7 +197,7 @@ def youtube_banner():
             f'<a class="yt-card" href="{url}" target="_blank" rel="noopener" '
             f'style="text-decoration:none !important;">'
             f'<div class="yt-thumb"><img src="{thumb}" alt=""><span class="yt-play">&#9654;</span></div>'
-            f'<div style="padding:10px 12px 12px; font-size:13.5px; font-weight:600; '
+            f'<div class="yt-title" style="padding:10px 12px 12px; font-size:13.5px; font-weight:600; '
             f'line-height:1.45; color:#222 !important;">{_html.escape(title)}</div></a>'
         )
     st.markdown(
@@ -229,6 +228,27 @@ def spec_banner():
     components.html(html, height=112)
 
 
+def kakao_banner():
+    html = (
+        "<style>"
+        "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}"
+        "a.b{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#FEE500;"
+        "border-radius:16px;padding:16px 22px;text-decoration:none;}"
+        ".tx{min-width:0;}"
+        ".t{color:#3c1e1e;font-size:17px;font-weight:800;line-height:1.35;}"
+        ".s{color:#6b531e;font-size:13px;margin-top:3px;}"
+        ".btn{background:#3c1e1e;color:#fee500;font-weight:800;font-size:14px;padding:11px 18px;"
+        "border-radius:10px;white-space:nowrap;flex-shrink:0;}"
+        "@media(max-width:520px){.t{font-size:14px}.s{font-size:11px}.btn{font-size:12px;padding:9px 13px}a.b{padding:13px 15px;gap:9px}}"
+        "</style>"
+        '<a class="b" href="%s" target="_blank" rel="noopener">'
+        '<div class="tx"><div class="t">\U0001f4ac 잡앤유 멘토님들과 함께 무료로 취업상담하기</div>'
+        '<div class="s">카카오톡 채널로 편하게 질문하세요</div></div>'
+        '<div class="btn">카톡 상담 &rarr;</div></a>'
+    ) % KAKAO_URL
+    components.html(html, height=118)
+
+
 def consulting_banner():
     html = (
         "<style>"
@@ -256,18 +276,17 @@ st.markdown('<div class="apptitle">🚗 ' + PAGE_TITLE + '</div>', unsafe_allow_
 st.caption("자동차산업 채용공고를 기업별로 모아 보관합니다. 마감 후에도 직무기술서를 다시 볼 수 있어요.")
 
 spec_banner()
+kakao_banner()
 
 df = load_data()
 if df.empty:
     st.warning("data.json 을 찾을 수 없습니다. app.py 와 같은 폴더에 data.json 을 두세요.")
     st.stop()
 
-imminent = int(df["D-day"].str.match(r"D-([0-7])$").fillna(False).sum())
 st.markdown(
     f'<div class="metrics">'
     f'<div class="m"><div class="ml">전체 공고</div><div class="mv">{len(df)}건</div></div>'
     f'<div class="m"><div class="ml">기업 수</div><div class="mv">{df["company"].nunique()}곳</div></div>'
-    f'<div class="m"><div class="ml">마감 임박(7일)</div><div class="mv">{imminent}건</div></div>'
     f'</div>', unsafe_allow_html=True)
 
 st.divider()
@@ -301,7 +320,7 @@ if sel_loc:
 view = view.sort_values(["company", "employment_type", "title"], kind="stable")
 st.markdown(f"**{len(view)}건** 표시 중")
 
-cols = ["company", "title", "employment_type", "job_family", "location", "deadline", "D-day"]
+cols = ["company", "title", "employment_type", "job_family", "location", "deadline"]
 st.dataframe(
     view[cols].rename(columns={
         "company": "기업", "title": "직무", "employment_type": "채용구분",
