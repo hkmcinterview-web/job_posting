@@ -31,9 +31,8 @@ st.set_page_config(page_title=PAGE_TITLE, page_icon="🚗", layout="wide")
 
 CSS = """
 <style>
-.block-container {max-width: 1120px; padding-top: 3rem;}
+.block-container {max-width: 1120px; padding-top: 2.5rem;}
 [data-testid="stVerticalBlock"]{gap:0.35rem !important;}
-h1 {font-size:clamp(16px,4.6vw,30px) !important; overflow:visible !important;}
 .metrics {display:flex; gap:8px; margin:2px 0 8px;}
 .metrics .m {flex:1; background:#f1f4f8; border-radius:10px; padding:10px 6px; text-align:center;}
 .metrics .ml {font-size:12px; color:#5b6472; margin-bottom:3px;}
@@ -81,6 +80,7 @@ h1 {font-size:clamp(16px,4.6vw,30px) !important; overflow:visible !important;}
 /* 모바일 */
 @media (max-width:640px){
   .block-container {padding-top:1.0rem;}
+  h1 {font-size:17px !important; line-height:1.4 !important;}
   .metrics .mv {font-size:16px;}
   .metrics .ml {font-size:10px;}
   .metrics .m {padding:8px 4px;}
