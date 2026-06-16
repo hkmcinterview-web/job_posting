@@ -79,7 +79,7 @@ CSS = """
 .cta-btn {background:#2f6fed; color:#fff; font-weight:800; font-size:15px; padding:13px 22px; border-radius:10px; white-space:nowrap;}
 /* 모바일 */
 @media (max-width:640px){
-  .block-container {padding-top:1.0rem;}
+  .block-container {padding-top:3.6rem;}
   h1 {font-size:17px !important; line-height:1.4 !important;}
   .metrics .mv {font-size:16px;}
   .metrics .ml {font-size:10px;}
