@@ -56,7 +56,7 @@ CSS = """
 /* 유튜브 배너 */
 .yt-wrap {background:#fbf7f7; border:1px solid #f1dada; border-radius:16px; padding:18px 20px; margin:6px 0 4px;}
 .yt-head {font-size:15px; font-weight:800; color:#c4302b; margin-bottom:12px; display:flex; align-items:center; gap:8px;}
-.yt-grid {display:grid; grid-template-columns:repeat(auto-fit, minmax(210px,1fr)); gap:14px;}
+.yt-grid {display:grid; grid-template-columns:repeat(3, 1fr); gap:10px;}
 .yt-card {display:block; text-decoration:none; color:inherit; background:#fff; border:1px solid #eee; border-radius:12px; overflow:hidden; transition:transform .12s, box-shadow .12s;}
 .yt-card:hover {transform:translateY(-2px); box-shadow:0 6px 18px rgba(0,0,0,.10);}
 .yt-thumb {position:relative; width:100%; aspect-ratio:16/9; background:#000;}
@@ -73,12 +73,15 @@ CSS = """
 .cta-btn {background:#2f6fed; color:#fff; font-weight:800; font-size:15px; padding:13px 22px; border-radius:10px; white-space:nowrap;}
 /* 모바일 */
 @media (max-width:640px){
-  .block-container {padding-top:1.4rem;}
-  .job-card {padding:20px 18px; font-size:15px;}
-  .job-card .title {font-size:21px;}
-  .cta {padding:18px; }
-  .cta-t {font-size:17px;}
-  .cta-btn {width:100%; text-align:center;}
+  .block-container {padding-top:1.1rem;}
+  h1 {font-size:22px !important; line-height:1.25 !important;}
+  .job-card {padding:18px 15px; font-size:15px;}
+  .job-card .title {font-size:20px;}
+  .yt-wrap {padding:12px 12px;}
+  .yt-head {font-size:12.5px; margin-bottom:9px;}
+  .yt-grid {gap:6px;}
+  .yt-title {font-size:11px; padding:7px 7px 9px; line-height:1.35;}
+  .yt-play {width:30px; height:30px; font-size:13px;}
 }
 </style>
 """
@@ -198,16 +201,44 @@ def youtube_banner():
 
 def spec_banner():
     html = (
-        '''%s<a href="%s" target="_blank" rel="noopener" style="display:flex; align-items:center; justify-content:space-between; gap:14px; background:#10141c; border-radius:16px; padding:18px 24px; text-decoration:none;"><div><div style="color:#ffffff; font-size:17px; font-weight:700; line-height:1.35;">📊 26년 상반기 현대차 서류합격 스펙분석</div><div style="color:#aeb6c4; font-size:13px; margin-top:3px;">합격자 스펙 데이터로 내 위치 확인하기</div></div><div style="background:#2f6fed; color:#ffffff; font-weight:700; font-size:14.5px; padding:11px 20px; border-radius:10px; white-space:nowrap; flex-shrink:0;">분석하러 가기 &rarr;</div></a>''' % (BODY_CSS, SPEC_URL)
-    )
-    components.html(html, height=104)
+        "<style>"
+        "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}"
+        "a.b{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#10141c;"
+        "border-radius:16px;padding:16px 22px;text-decoration:none;}"
+        ".tx{min-width:0;}"
+        ".t{color:#fff;font-size:17px;font-weight:700;line-height:1.35;}"
+        ".s{color:#aeb6c4;font-size:13px;margin-top:3px;}"
+        ".btn{background:#2f6fed;color:#fff;font-weight:700;font-size:14px;padding:11px 18px;"
+        "border-radius:10px;white-space:nowrap;flex-shrink:0;}"
+        "@media(max-width:520px){.t{font-size:14px}.s{font-size:11px}.btn{font-size:12px;padding:9px 13px}a.b{padding:13px 15px;gap:9px}}"
+        "</style>"
+        '<a class="b" href="%s" target="_blank" rel="noopener">'
+        '<div class="tx"><div class="t">📊 26년 상반기 현대차 서류합격 스펙분석</div>'
+        '<div class="s">합격자 스펙 데이터로 내 위치 확인하기</div></div>'
+        '<div class="btn">분석하러 가기 &rarr;</div></a>'
+    ) % SPEC_URL
+    components.html(html, height=112)
 
 
 def consulting_banner():
     html = (
-        '''%s<a href="%s" target="_blank" rel="noopener" style="display:flex; align-items:center; justify-content:space-between; gap:14px; background:#10141c; border-radius:16px; padding:20px 24px; text-decoration:none;"><div><div style="color:#ffffff; font-size:18px; font-weight:700; line-height:1.35;">자소서 첨삭 · 모의면접 1:1 컨설팅</div><div style="color:#aeb6c4; font-size:13.5px; margin-top:4px;">현직자 멘토와 함께 합격까지 — 잡앤유 컨설팅 바로가기</div></div><div style="background:#2f6fed; color:#ffffff; font-weight:700; font-size:15px; padding:12px 22px; border-radius:10px; white-space:nowrap; flex-shrink:0;">상담 신청하기 &rarr;</div></a>''' % (BODY_CSS, CONSULT_URL)
-    )
-    components.html(html, height=110)
+        "<style>"
+        "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}"
+        "a.b{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#10141c;"
+        "border-radius:16px;padding:18px 22px;text-decoration:none;}"
+        ".tx{min-width:0;}"
+        ".t{color:#fff;font-size:18px;font-weight:700;line-height:1.35;}"
+        ".s{color:#aeb6c4;font-size:13.5px;margin-top:4px;}"
+        ".btn{background:#2f6fed;color:#fff;font-weight:700;font-size:14.5px;padding:12px 20px;"
+        "border-radius:10px;white-space:nowrap;flex-shrink:0;}"
+        "@media(max-width:520px){.t{font-size:15px}.s{font-size:11.5px}.btn{font-size:12.5px;padding:10px 14px}a.b{padding:14px 16px;gap:9px}}"
+        "</style>"
+        '<a class="b" href="%s" target="_blank" rel="noopener">'
+        '<div class="tx"><div class="t">자소서 첨삭 · 모의면접 1:1 컨설팅</div>'
+        '<div class="s">현직자 멘토와 함께 합격까지 — 잡앤유 컨설팅 바로가기</div></div>'
+        '<div class="btn">상담 신청하기 &rarr;</div></a>'
+    ) % CONSULT_URL
+    components.html(html, height=120)
 
 
 # ── 화면 ─────────────────────────────────────────────────────
