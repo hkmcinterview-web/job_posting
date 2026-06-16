@@ -31,8 +31,9 @@ st.set_page_config(page_title=PAGE_TITLE, page_icon="🚗", layout="wide")
 
 CSS = """
 <style>
-.block-container {max-width: 1120px; padding-top: 2.2rem;}
-.apptitle {font-size:clamp(15px,4.5vw,27px); font-weight:800; color:#10141c; line-height:1.3; margin:2px 0 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.block-container {max-width: 1120px; padding-top: 2.0rem;}
+[data-testid="stVerticalBlock"]{gap:0.55rem !important;}
+.apptitle {font-size:clamp(15px,4.5vw,27px); font-weight:800; color:#10141c; line-height:1.4; margin:2px 0 6px; padding:2px 0;}
 .metrics {display:flex; gap:8px; margin:2px 0 8px;}
 .metrics .m {flex:1; background:#f1f4f8; border-radius:10px; padding:10px 6px; text-align:center;}
 .metrics .ml {font-size:12px; color:#5b6472; margin-bottom:3px;}
@@ -212,7 +213,7 @@ def spec_banner():
         "<style>"
         "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}"
         "a.b{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#10141c;"
-        "border-radius:16px;padding:16px 22px;text-decoration:none;}"
+        "border-radius:16px;padding:13px 22px;text-decoration:none;}"
         ".tx{min-width:0;}"
         ".t{color:#fff;font-size:17px;font-weight:700;line-height:1.35;}"
         ".s{color:#aeb6c4;font-size:13px;margin-top:3px;}"
@@ -225,7 +226,7 @@ def spec_banner():
         '<div class="s">합격자 스펙 데이터로 내 위치 확인하기</div></div>'
         '<div class="btn">분석하러 가기 &rarr;</div></a>'
     ) % SPEC_URL
-    components.html(html, height=112)
+    components.html(html, height=92)
 
 
 def kakao_banner():
@@ -233,7 +234,7 @@ def kakao_banner():
         "<style>"
         "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}"
         "a.b{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#FEE500;"
-        "border-radius:16px;padding:16px 22px;text-decoration:none;}"
+        "border-radius:16px;padding:13px 22px;text-decoration:none;}"
         ".tx{min-width:0;}"
         ".t{color:#3c1e1e;font-size:17px;font-weight:800;line-height:1.35;}"
         ".s{color:#6b531e;font-size:13px;margin-top:3px;}"
@@ -246,7 +247,7 @@ def kakao_banner():
         '<div class="s">카카오톡 채널로 편하게 질문하세요</div></div>'
         '<div class="btn">카톡 상담 &rarr;</div></a>'
     ) % KAKAO_URL
-    components.html(html, height=118)
+    components.html(html, height=100)
 
 
 def consulting_banner():
@@ -254,7 +255,7 @@ def consulting_banner():
         "<style>"
         "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;}"
         "a.b{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#10141c;"
-        "border-radius:16px;padding:18px 22px;text-decoration:none;}"
+        "border-radius:16px;padding:15px 22px;text-decoration:none;}"
         ".tx{min-width:0;}"
         ".t{color:#fff;font-size:18px;font-weight:700;line-height:1.35;}"
         ".s{color:#aeb6c4;font-size:13.5px;margin-top:4px;}"
@@ -267,7 +268,7 @@ def consulting_banner():
         '<div class="s">현직자 멘토와 함께 합격까지 — 잡앤유 컨설팅 바로가기</div></div>'
         '<div class="btn">상담 신청하기 &rarr;</div></a>'
     ) % CONSULT_URL
-    components.html(html, height=120)
+    components.html(html, height=102)
 
 
 # ── 화면 ─────────────────────────────────────────────────────
