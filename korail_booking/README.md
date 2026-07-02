@@ -87,6 +87,47 @@ python booker.py -c other.yaml   # 다른 설정 파일 지정
 - **라즈베리파이/미니 서버**: `nohup python booker.py &` 또는 `systemd`/`tmux`.
 - **무료 클라우드**: 항상 켜지는 소형 VM 등. (지속 실행 시에도 간격을 넉넉히 유지)
 
+## 3-1. 휴대폰에서 실행하기
+
+이 프로그램은 파이썬 스크립트라 **PC/서버에서 켜두고 알림만 폰으로 받는 방식**이 가장
+편하고 안정적입니다(알림은 어차피 텔레그램/ntfy로 폰에 옵니다). 하지만 폰에서 직접
+돌리고 싶다면:
+
+### 안드로이드 — Termux (가능, 권장)
+
+1. **F-Droid** 에서 **Termux** 설치 (Play스토어 버전은 오래돼서 비권장)
+2. Termux 에서:
+   ```bash
+   pkg update && pkg upgrade -y
+   pkg install python git -y
+   pip install "setuptools<66"
+   git clone <이_저장소_주소>
+   cd job_posting/korail_booking
+   pip install -r requirements.txt
+   cp config.example.yaml config.yaml
+   nano config.yaml        # 값 채우고 Ctrl+O 저장, Ctrl+X 종료
+   python booker.py
+   ```
+3. 화면을 꺼도 계속 돌게 하려면:
+   - 실행 전에 `termux-wake-lock` (CPU 잠들지 않게)
+   - 안드로이드 **설정 > 배터리 > Termux 최적화 예외** 로 지정
+   - 부팅 시 자동 실행이 필요하면 **Termux:Boot** 애드온 설치
+
+### 아이폰 (iOS) — 비권장
+
+a-Shell/Pyto 같은 앱으로 스크립트 실행 자체는 되지만, iOS는 앱이 백그라운드로
+가거나 화면이 꺼지면 **프로세스를 강제로 멈춥니다.** 몇 시간씩 조회를 계속 돌려야
+하는 이 용도에는 맞지 않습니다. 아이폰 사용자는 아래 "항상 켜두는 방법"을 쓰세요.
+
+### 항상 켜두는 방법 (가장 추천 — 폰은 알림만 받기)
+
+폰에서 계속 켜두는 건 배터리/절전 때문에 잘 끊깁니다. 아래 중 하나에 올려두고
+**알림만 폰으로** 받는 걸 추천합니다.
+
+- **집에 있는 PC / 라즈베리파이**: `tmux` 안에서 `python booker.py` 실행 후 창 닫기
+- **무료 클라우드 VM**: 예) Oracle Cloud 항상 무료 티어, GCP 프리티어 소형 VM
+- **PythonAnywhere / Replit** 같은 상시 실행 서비스
+
 ## 4. 자주 겪는 문제
 
 | 증상 | 해결 |
