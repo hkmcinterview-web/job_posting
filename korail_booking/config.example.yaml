@@ -1,0 +1,41 @@
+# korail_booking 설정 예시
+# 이 파일을 config.yaml 로 복사한 뒤 값을 채워 사용하세요.
+#   cp config.example.yaml config.yaml
+# config.yaml 에는 로그인 정보가 들어가므로 절대 커밋/공유하지 마세요(.gitignore 에 이미 등록됨).
+
+korail:
+  # 코레일 회원번호(멤버십 번호) 또는 이메일/휴대폰 번호
+  login_id: "여기에_회원번호"
+  password: "여기에_비밀번호"
+
+trip:
+  dep: "서울"          # 출발역 (한글 역명)
+  arr: "부산"          # 도착역
+  date: "20260815"     # 승차 날짜 YYYYMMDD
+  time_from: "090000"  # 이 시각 이후 출발 열차만 (HHMMSS)
+  time_to: "140000"    # 이 시각 이전 출발 열차만 (HHMMSS). 비우면 그날 끝까지
+  train_types: ["KTX"] # KTX / KTX_SANCHEON / ITX_SAEMAEUL / SAEMAEUL / MUGUNGHWA / ALL 등
+  adults: 1            # 어른 인원
+  children: 0          # 어린이 인원
+  seat_option: "GENERAL_FIRST"  # GENERAL_FIRST / GENERAL_ONLY / SPECIAL_FIRST / SPECIAL_ONLY
+
+polling:
+  # 사람이 하는 수준의 여유 있는 간격을 유지하세요. 너무 짧으면 매크로로 차단됩니다.
+  interval_seconds: 40      # 기본 조회 간격(초)
+  jitter_seconds: 15        # 매번 0~이 값만큼 랜덤 추가(사람처럼 불규칙하게)
+  stop_after_reserve: true  # 예약 성공하면 프로그램 종료(true 권장)
+  max_minutes: 0            # 이 시간(분) 지나면 자동 종료. 0이면 무제한
+
+notify:
+  telegram:
+    enabled: true
+    # @BotFather 로 봇 생성 후 받은 토큰
+    bot_token: "여기에_봇토큰"
+    # 봇과 대화 시작 후 https://api.telegram.org/bot<토큰>/getUpdates 에서 확인한 chat id
+    chat_id: "여기에_chat_id"
+  ntfy:
+    # 폰 푸시/알람용. ntfy 앱 설치 후 아래 topic 을 구독하세요. (무료, 서버 불필요)
+    enabled: true
+    server: "https://ntfy.sh"
+    topic: "여기에_추측하기_어려운_토픽명"  # 예: korail-a8f3k2-myseat
+    priority: 5   # 5=최고(잠금화면/소리 알림)

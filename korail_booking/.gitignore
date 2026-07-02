@@ -1,0 +1,7 @@
+# 로그인 정보/토큰이 들어가는 실제 설정 파일은 커밋 금지
+config.yaml
+*.log
+__pycache__/
+*.pyc
+.venv/
+venv/
