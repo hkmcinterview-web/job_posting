@@ -1,0 +1,93 @@
+# -*- coding: utf-8 -*-
+"""네이버 카페 글쓰기 API 클라이언트.
+
+- 공식 카페 API (openapi.naver.com/v1/cafe/...) 사용 — 네이버 아이디/비번을 저장하지 않습니다.
+- access_token 은 1시간마다 만료되므로 refresh_token 으로 자동 갱신합니다.
+- 최초 1회 `python naver_auth.py` 로 로그인해 naver_tokens.json 을 생성해야 합니다.
+"""
+import json
+import time
+from urllib.parse import quote
+
+import requests
+
+import config
+
+TOKEN_URL = "https://nid.naver.com/oauth2.0/token"
+
+
+def load_tokens() -> dict:
+    if not config.NAVER_TOKEN_FILE.exists():
+        raise RuntimeError("naver_tokens.json 이 없습니다. 먼저 `python naver_auth.py` 를 실행해 네이버 로그인을 완료하세요.")
+    return json.loads(config.NAVER_TOKEN_FILE.read_text(encoding="utf-8"))
+
+
+def save_tokens(tokens: dict):
+    config.NAVER_TOKEN_FILE.write_text(json.dumps(tokens, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def refresh_access_token(tokens: dict) -> dict:
+    r = requests.get(TOKEN_URL, params={
+        "grant_type": "refresh_token",
+        "client_id": config.NAVER_CLIENT_ID,
+        "client_secret": config.NAVER_CLIENT_SECRET,
+        "refresh_token": tokens["refresh_token"],
+    }, timeout=20)
+    r.raise_for_status()
+    data = r.json()
+    if "access_token" not in data:
+        raise RuntimeError(f"네이버 토큰 갱신 실패: {data}")
+    tokens["access_token"] = data["access_token"]
+    tokens["obtained_at"] = int(time.time())
+    save_tokens(tokens)
+    return tokens
+
+
+def _get_access_token() -> str:
+    tokens = load_tokens()
+    # 발급 후 50분 지났으면 선제적으로 갱신
+    if int(time.time()) - tokens.get("obtained_at", 0) > 50 * 60:
+        tokens = refresh_access_token(tokens)
+    return tokens["access_token"]
+
+
+def post_article(subject: str, content_html: str, image_paths=None) -> dict:
+    """카페에 글을 작성하고 {'articleId': ..., 'articleUrl': ...} 를 반환합니다.
+
+    네이버 카페 API 규격상 subject/content 는 UTF-8 URL 인코딩해서 보내야 합니다.
+    이미지는 multipart 'image' 필드로 첨부하면 글에 함께 게시됩니다.
+    """
+    token = _get_access_token()
+    url = (f"https://openapi.naver.com/v1/cafe/{config.NAVER_CAFE_CLUB_ID}"
+           f"/menu/{config.NAVER_CAFE_MENU_ID}/articles")
+    data = {
+        "subject": quote(subject, safe=""),
+        "content": quote(content_html, safe=""),
+    }
+
+    def _send(access_token):
+        files = []
+        try:
+            for p in (image_paths or []):
+                files.append(("image", (p.name, open(p, "rb"), "image/png")))
+            return requests.post(url, data=data, files=files or None,
+                                 headers={"Authorization": f"Bearer {access_token}"},
+                                 timeout=60)
+        finally:
+            for _, (_, fh, _) in files:
+                fh.close()
+
+    resp = _send(token)
+    if resp.status_code == 401:  # 토큰 만료 — 갱신 후 1회 재시도
+        tokens = refresh_access_token(load_tokens())
+        resp = _send(tokens["access_token"])
+
+    if resp.status_code != 200:
+        raise RuntimeError(f"카페 글쓰기 실패 (HTTP {resp.status_code}): {resp.text[:500]}")
+
+    result = resp.json().get("message", {}).get("result", {})
+    return {
+        "articleId": result.get("articleId"),
+        "articleUrl": result.get("articleUrl") or result.get("cafeUrl"),
+        "raw": result,
+    }

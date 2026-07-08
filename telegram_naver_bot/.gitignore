@@ -1,0 +1,6 @@
+.env
+naver_tokens.json
+cards/
+fonts/
+__pycache__/
+*.pyc
