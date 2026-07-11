@@ -32,7 +32,13 @@ FONT_SOURCES = {
         "https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf",
         "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf",
     ],
+    # 브랜드명 전용 — 주아체(귀엽고 친근한 폰트)
+    "Jua-Regular.ttf": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/jua/Jua-Regular.ttf",
+        "https://github.com/google/fonts/raw/main/ofl/jua/Jua-Regular.ttf",
+    ],
 }
+BRAND_FONT_FILE = "Jua-Regular.ttf"
 
 
 def _ensure_font(name: str) -> Path:
@@ -58,6 +64,15 @@ def _ensure_font(name: str) -> Path:
 def _font(bold: bool, size: int) -> ImageFont.FreeTypeFont:
     name = "NotoSansCJKkr-Bold.otf" if bold else "NotoSansCJKkr-Regular.otf"
     return ImageFont.truetype(str(_ensure_font(name)), size)
+
+
+def _brand_font(size: int) -> ImageFont.FreeTypeFont:
+    """브랜드명 전용 폰트(주아체). 실패 시 기본 볼드로 대체."""
+    try:
+        return ImageFont.truetype(str(_ensure_font(BRAND_FONT_FILE)), size)
+    except Exception as e:
+        print(f"[card_news] 브랜드 폰트 로드 실패, 기본 폰트 사용: {e}")
+        return _font(True, size)
 
 
 def _load_background(article: dict) -> Image.Image:
@@ -142,9 +157,9 @@ def _draw_card(headline: str, background: Image.Image, source: str,
         draw.text((W - MARGIN, footer_cy), page, font=src_font,
                   fill=SUBTEXT, anchor="rm")
 
-    # 유튜브 로고 + 브랜드명 (하단 중앙, 세로 중앙 정렬)
+    # 유튜브 로고 + 브랜드명 (하단 중앙, 세로 중앙 정렬) — 주아체
     brand = config.BRAND_NAME
-    brand_font = _font(True, 30)
+    brand_font = _brand_font(37)   # 주아체는 같은 pt 에서 조금 작아 살짝 키움
     icon_h = 30
     icon_w = round(icon_h * 1.42)   # 유튜브 로고 가로:세로 ≈ 1.42
     gap = 12
