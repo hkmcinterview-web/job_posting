@@ -136,9 +136,9 @@ def _draw_card(headline: str, background: Image.Image, source: str,
     # 하단 요소들의 세로 중앙 기준선
     footer_cy = H - 74
 
-    # ── 헤드라인 (하단 정렬) ──
+    # ── 헤드라인 (하단 정렬, 살짝 위로 — 단 화면 중앙보다는 아래) ──
     lines = _wrap(draw, headline, headline_font, W - MARGIN * 2)[:4]
-    text_bottom = footer_cy - 66
+    text_bottom = footer_cy - 140
     y = text_bottom - len(lines) * line_gap
     for line in lines:
         # 살짝 그림자를 깔아 밝은 사진에서도 읽히게
@@ -148,7 +148,7 @@ def _draw_card(headline: str, background: Image.Image, source: str,
 
     # ── 하단: 출처(좌) · 유튜브로고+브랜드(중앙) · 페이지(우) ──
     # anchor 로 세로 중앙(middle) 정렬해 로고와 글자 높이를 맞춘다
-    src_font = _font(False, 26)
+    src_font = _font(False, 24)
     if source:
         draw.text((MARGIN, footer_cy), f"@{source}"[:20], font=src_font,
                   fill=SUBTEXT, anchor="lm")
@@ -159,10 +159,10 @@ def _draw_card(headline: str, background: Image.Image, source: str,
 
     # 유튜브 로고 + 브랜드명 (하단 중앙, 세로 중앙 정렬) — 주아체
     brand = config.BRAND_NAME
-    brand_font = _brand_font(37)   # 주아체는 같은 pt 에서 조금 작아 살짝 키움
-    icon_h = 30
+    brand_font = _brand_font(32)   # 주아체는 같은 pt 에서 조금 작아 살짝 키움
+    icon_h = 26
     icon_w = round(icon_h * 1.42)   # 유튜브 로고 가로:세로 ≈ 1.42
-    gap = 12
+    gap = 11
     bw = draw.textlength(brand, font=brand_font)
     total_w = icon_w + gap + bw
     sx = (W - total_w) / 2
