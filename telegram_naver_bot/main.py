@@ -41,7 +41,7 @@ def process_text(tg: TelegramClient, chat_id: int, text: str):
 
         try:
             cards = build_cards(art, config.MAX_CARDS_PER_LINK)
-            paths = render_cards(cards, art.get("site", ""), f"{stamp}_{idx}")
+            paths = render_cards(cards, art, f"{stamp}_{idx}")
             all_card_paths.extend(paths)
             if config.SEND_CARDS_TO_TELEGRAM:
                 for p in paths:

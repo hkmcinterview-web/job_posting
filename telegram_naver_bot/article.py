@@ -26,6 +26,7 @@ def fetch_article(url: str) -> dict:
         title = soup.title.get_text(strip=True)
     description = og("description")
     site = og("site_name") or urlparse(url).netloc
+    image_url = og("image")
 
     paragraphs = []
     for p in soup.find_all("p"):
@@ -40,5 +41,16 @@ def fetch_article(url: str) -> dict:
         "title": title or url,
         "description": description,
         "site": site,
+        "image_url": image_url,
         "paragraphs": paragraphs,
     }
+
+
+def fetch_image_bytes(image_url: str, referer: str = "") -> bytes:
+    """기사 대표사진 다운로드 (일부 언론사는 Referer 를 요구)."""
+    headers = dict(HEADERS)
+    if referer:
+        headers["Referer"] = referer
+    resp = requests.get(image_url, headers=headers, timeout=20)
+    resp.raise_for_status()
+    return resp.content
