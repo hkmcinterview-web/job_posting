@@ -116,13 +116,14 @@ def _draw_card(headline: str, background: Image.Image, source: str,
 
     draw = ImageDraw.Draw(img)
     headline_font = _font(True, 78)
-    footer_font = _font(True, 34)
     line_gap = 106
+
+    # 하단 요소들의 세로 중앙 기준선
+    footer_cy = H - 74
 
     # ── 헤드라인 (하단 정렬) ──
     lines = _wrap(draw, headline, headline_font, W - MARGIN * 2)[:4]
-    footer_y = H - 96
-    text_bottom = footer_y - 40
+    text_bottom = footer_cy - 66
     y = text_bottom - len(lines) * line_gap
     for line in lines:
         # 살짝 그림자를 깔아 밝은 사진에서도 읽히게
@@ -131,22 +132,28 @@ def _draw_card(headline: str, background: Image.Image, source: str,
         y += line_gap
 
     # ── 하단: 출처(좌) · 유튜브로고+브랜드(중앙) · 페이지(우) ──
-    src_font = _font(False, 30)
+    # anchor 로 세로 중앙(middle) 정렬해 로고와 글자 높이를 맞춘다
+    src_font = _font(False, 26)
     if source:
-        draw.text((MARGIN, footer_y + 4), f"@{source}"[:20], font=src_font, fill=SUBTEXT)
+        draw.text((MARGIN, footer_cy), f"@{source}"[:20], font=src_font,
+                  fill=SUBTEXT, anchor="lm")
     if total > 1:
         page = f"{index + 1}/{total}"
-        pw = draw.textlength(page, font=src_font)
-        draw.text((W - MARGIN - pw, footer_y + 4), page, font=src_font, fill=SUBTEXT)
+        draw.text((W - MARGIN, footer_cy), page, font=src_font,
+                  fill=SUBTEXT, anchor="rm")
 
-    # 유튜브 로고 + 브랜드명 (하단 중앙)
+    # 유튜브 로고 + 브랜드명 (하단 중앙, 세로 중앙 정렬)
     brand = config.BRAND_NAME
-    icon_w, icon_h, gap = 60, 42, 16
-    bw = draw.textlength(brand, font=footer_font)
+    brand_font = _font(True, 30)
+    icon_h = 30
+    icon_w = round(icon_h * 1.42)   # 유튜브 로고 가로:세로 ≈ 1.42
+    gap = 12
+    bw = draw.textlength(brand, font=brand_font)
     total_w = icon_w + gap + bw
     sx = (W - total_w) / 2
-    _draw_youtube(draw, sx, footer_y - 3, icon_w, icon_h)
-    draw.text((sx + icon_w + gap, footer_y), brand, font=footer_font, fill=WHITE)
+    _draw_youtube(draw, sx, footer_cy - icon_h / 2, icon_w, icon_h)
+    draw.text((sx + icon_w + gap, footer_cy), brand, font=brand_font,
+              fill=WHITE, anchor="lm")
 
     return img
 
