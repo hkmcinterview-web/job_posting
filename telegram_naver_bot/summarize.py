@@ -24,8 +24,10 @@ def _build_prompt(article: dict, max_cards: int) -> str:
         "다음 뉴스 기사를 SNS 카드뉴스 헤드라인으로 만들어 주세요.\n"
         "기사 사진 위에 큰 글씨로 얹는 형식이라 문장이 짧고 눈에 확 들어와야 합니다.\n\n"
         "규칙:\n"
+        "- ⚠️ 기사 제목을 그대로 베끼지 말 것! 본문 내용을 파악해서 새로 쓴 센스있는 문장이어야 함\n"
         f"- 기본은 카드 1장. 기사에 서로 다른 핵심 포인트가 여럿일 때만 최대 {max_cards}장\n"
         "- headline 은 2~3줄, 각 줄 8~14자, 줄바꿈 위치는 의미 단위로 자연스럽게 (\\n 사용)\n"
+        "- 첫 줄은 후킹하는 한마디(반응/요점), 이어지는 줄에서 핵심 사실 전달\n"
         "- 커뮤니티 카드뉴스처럼 딱딱하지 않고 위트있게. 예시 톤:\n"
         '  "노동계 대폭발에 화들짝\\n\'성과급 지역화폐 지급법\'\\n법안 철회"\n'
         '  "미국산 칩 생산 드가자\\n브로드컴, 애플과 45조 원\\n계약에 주가 상승"\n'
@@ -51,49 +53,68 @@ def _extract_cards(text: str) -> list:
     return [c for c in data.get("cards", []) if c.get("headline", "").strip()]
 
 
-def build_cards(article: dict, max_cards: int = 3) -> list:
+def build_cards(article: dict, max_cards: int = 3):
+    """returns (cards, engine, error)
+    engine ∈ {'gemini','claude','heuristic'}, error 는 AI 실패 사유(없으면 "")."""
     max_cards = max(1, min(3, max_cards))
     prompt = _build_prompt(article, max_cards)
+    error = ""
 
     if config.GEMINI_API_KEY:
         try:
             cards = _build_cards_gemini(prompt)
             if cards:
-                return cards[:max_cards]
+                return cards[:max_cards], "gemini", ""
+            error = "Gemini 응답에 카드가 없음"
         except Exception as e:
+            error = f"Gemini: {e}"
             print(f"[summarize] Gemini 요약 실패, 다음 방식으로 대체: {e}")
 
     if config.ANTHROPIC_API_KEY:
         try:
             cards = _build_cards_claude(prompt)
             if cards:
-                return cards[:max_cards]
+                return cards[:max_cards], "claude", ""
+            error = error or "Claude 응답에 카드가 없음"
         except Exception as e:
+            error = f"Claude: {e}"
             print(f"[summarize] Claude 요약 실패, 휴리스틱으로 대체: {e}")
 
-    return _build_cards_heuristic(article, max_cards)
+    return _build_cards_heuristic(article, max_cards), "heuristic", error
 
 
 # ── ① 구글 Gemini (무료 등급) ────────────────────────────
 
 def _build_cards_gemini(prompt: str) -> list:
-    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-           f"{config.GEMINI_MODEL}:generateContent")
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0.9},
     }
-    resp = requests.post(url, params={"key": config.GEMINI_API_KEY},
-                         json=payload, timeout=40)
-    if resp.status_code != 200:
-        raise RuntimeError(f"Gemini HTTP {resp.status_code}: {resp.text[:300]}")
-    data = resp.json()
-    candidates = data.get("candidates", [])
-    if not candidates:
-        raise RuntimeError(f"Gemini 응답 비어있음: {str(data)[:300]}")
-    parts = candidates[0].get("content", {}).get("parts", [])
-    text = "".join(p.get("text", "") for p in parts)
-    return _extract_cards(text)
+    # 설정 모델을 먼저 시도하고, 실패(404 등)하면 대체 모델들을 순서대로 시도
+    models, seen = [], set()
+    for m in [config.GEMINI_MODEL, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]:
+        if m and m not in seen:
+            seen.add(m)
+            models.append(m)
+
+    last_err = None
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        resp = requests.post(url, params={"key": config.GEMINI_API_KEY},
+                             json=payload, timeout=40)
+        if resp.status_code == 404:  # 모델 이름 문제 — 다음 후보로
+            last_err = f"모델 '{model}' 없음(404)"
+            continue
+        if resp.status_code != 200:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            raise RuntimeError(f"응답 비어있음(안전필터 가능): {str(data)[:200]}")
+        parts = candidates[0].get("content", {}).get("parts", [])
+        return _extract_cards("".join(p.get("text", "") for p in parts))
+
+    raise RuntimeError(last_err or "사용 가능한 Gemini 모델 없음")
 
 
 # ── ② Claude API (유료) ──────────────────────────────────

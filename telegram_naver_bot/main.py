@@ -90,7 +90,10 @@ def handle_card(tg: TelegramClient, chat_id: int, content: str):
             tg.send_message(chat_id, f"⚠️ 링크 {idx} 수집 실패({url}): {e}")
             continue
         try:
-            cards = build_cards(art, config.MAX_CARDS_PER_LINK)
+            cards, engine, err = build_cards(art, config.MAX_CARDS_PER_LINK)
+            if engine == "heuristic" and (config.GEMINI_API_KEY or config.ANTHROPIC_API_KEY):
+                # AI 키를 넣었는데 제목 그대로 나왔다면 이유를 알려줌
+                tg.send_message(chat_id, f"⚠️ AI 요약 실패로 제목을 사용했어요.\n사유: {err}")
             paths = render_cards(cards, art, f"{stamp}_{idx}")
             for p in paths:
                 tg.send_photo(chat_id, p, caption=art.get("title", "")[:80])

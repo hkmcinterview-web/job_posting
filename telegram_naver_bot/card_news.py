@@ -130,18 +130,36 @@ def _draw_card(headline: str, background: Image.Image, source: str,
         draw.text((MARGIN, y), line, font=headline_font, fill=WHITE)
         y += line_gap
 
-    # ── 하단 중앙 브랜드, (여러 장일 때) 우측 페이지 표시 ──
-    brand = config.BRAND_NAME
-    bw = draw.textlength(brand, font=footer_font)
-    draw.text(((W - bw) / 2, footer_y), brand, font=footer_font, fill=WHITE)
+    # ── 하단: 출처(좌) · 유튜브로고+브랜드(중앙) · 페이지(우) ──
+    src_font = _font(False, 30)
+    if source:
+        draw.text((MARGIN, footer_y + 4), f"@{source}"[:20], font=src_font, fill=SUBTEXT)
     if total > 1:
         page = f"{index + 1}/{total}"
-        pw = draw.textlength(page, font=footer_font)
-        draw.text((W - MARGIN - pw, footer_y), page, font=footer_font, fill=SUBTEXT)
-    if source:
-        draw.text((MARGIN, footer_y), source[:20], font=footer_font, fill=SUBTEXT)
+        pw = draw.textlength(page, font=src_font)
+        draw.text((W - MARGIN - pw, footer_y + 4), page, font=src_font, fill=SUBTEXT)
+
+    # 유튜브 로고 + 브랜드명 (하단 중앙)
+    brand = config.BRAND_NAME
+    icon_w, icon_h, gap = 60, 42, 16
+    bw = draw.textlength(brand, font=footer_font)
+    total_w = icon_w + gap + bw
+    sx = (W - total_w) / 2
+    _draw_youtube(draw, sx, footer_y - 3, icon_w, icon_h)
+    draw.text((sx + icon_w + gap, footer_y), brand, font=footer_font, fill=WHITE)
 
     return img
+
+
+def _draw_youtube(draw: ImageDraw.ImageDraw, x, y, w, h):
+    """유튜브 로고(빨간 라운드 사각형 + 흰 재생 삼각형)를 그립니다."""
+    draw.rounded_rectangle([x, y, x + w, y + h], radius=int(h * 0.28), fill=(255, 0, 0))
+    tri = [
+        (x + w * 0.40, y + h * 0.28),
+        (x + w * 0.40, y + h * 0.72),
+        (x + w * 0.64, y + h * 0.50),
+    ]
+    draw.polygon(tri, fill=(255, 255, 255))
 
 
 def render_cards(cards: list, article: dict, out_prefix: str) -> list:

@@ -44,7 +44,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 
 # ── 게시글/카드 설정 ─────────────────────────────────────
-BRAND_NAME = os.getenv("BRAND_NAME", "잡앤유")
+BRAND_NAME = os.getenv("BRAND_NAME", "공대생현직자 잡앤유")
 POST_HEADER = os.getenv("POST_HEADER", "")   # 카페 글 상단에 붙는 문구 (HTML 허용)
 POST_FOOTER = os.getenv("POST_FOOTER", "")   # 카페 글 하단에 붙는 문구 (HTML 허용)
 MAX_LINKS = int(os.getenv("MAX_LINKS", "5"))              # 메시지당 처리할 최대 링크 수
