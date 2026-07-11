@@ -33,8 +33,11 @@ def _build_prompt(article: dict, max_cards: int) -> str:
         '  "미국산 칩 생산 드가자\\n브로드컴, 애플과 45조 원\\n계약에 주가 상승"\n'
         '  "일론 머스크 싫으면 빼줌\\n월가, 머스크 기업 제외한\\nETF 준비 중"\n'
         "- 위트는 살리되 과장/왜곡 없이 기사 사실만 담기. 핵심 숫자(금액, 퍼센트)는 살리기\n"
+        "- tag: 기사 성격을 나타내는 2~4자 카테고리 (예: 이슈, 속보, 경제, 노동, 증시, 취업, 정치, 국제, IT)\n"
+        "- highlight: headline 여러 줄 중 가장 강조하고 싶은 '한 줄'을 그대로 복사 (반드시 headline 안의 한 줄과 정확히 일치)\n"
+        "- style: 강조 방식. 강렬한 이슈/속보는 \"marker\"(형광펜), 차분한 정보성은 \"color\"(포인트 컬러)\n"
         '- 반드시 아래 JSON 형식으로만 답하기 (다른 말 없이):\n'
-        '  {"cards": [{"headline": "..."}]}\n\n'
+        '  {"cards": [{"headline": "...", "tag": "...", "highlight": "...", "style": "marker"}]}\n\n'
         f"[기사 제목] {article.get('title', '')}\n"
         f"[요약] {article.get('description', '')}\n"
         f"[본문]\n{body}"
@@ -129,8 +132,13 @@ def _build_cards_claude(prompt: str) -> list:
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "properties": {"headline": {"type": "string"}},
-                    "required": ["headline"],
+                    "properties": {
+                        "headline": {"type": "string"},
+                        "tag": {"type": "string"},
+                        "highlight": {"type": "string"},
+                        "style": {"type": "string", "enum": ["marker", "color"]},
+                    },
+                    "required": ["headline", "tag", "highlight", "style"],
                     "additionalProperties": False,
                 },
             }

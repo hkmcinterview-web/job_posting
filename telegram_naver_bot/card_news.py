@@ -22,6 +22,9 @@ MARGIN = 70
 FALLBACK_BG = (16, 20, 28)   # #10141c — 사진 없을 때 배경
 WHITE = (255, 255, 255)
 SUBTEXT = (210, 214, 222)
+ACCENT = (255, 61, 87)       # 포인트 레드 (카테고리 태그)
+HILITE = (255, 224, 82)      # 형광펜/포인트 옐로 (핵심 강조)
+DARK = (20, 20, 20)
 
 FONT_SOURCES = {
     "NotoSansCJKkr-Bold.otf": [
@@ -115,8 +118,21 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> list:
     return [ln for ln in lines if ln != ""] or [""]
 
 
-def _draw_card(headline: str, background: Image.Image, source: str,
+def _emphasize(line: str, highlight: str) -> bool:
+    """이 줄이 강조 대상인지 — highlight 와 겹치면 True."""
+    line, highlight = line.strip(), (highlight or "").strip()
+    if not highlight or not line:
+        return False
+    return highlight in line or line in highlight
+
+
+def _draw_card(card, background: Image.Image, source: str,
                index: int, total: int) -> Image.Image:
+    headline = card.get("headline") or card.get("title", "")
+    tag = (card.get("tag") or "").strip()
+    highlight = card.get("highlight") or ""
+    style = card.get("style") or "marker"
+
     img = background.copy() if background is not None else Image.new("RGB", (W, H), FALLBACK_BG)
     if img.size != (W, H):
         img = img.resize((W, H), Image.LANCZOS)
@@ -136,14 +152,29 @@ def _draw_card(headline: str, background: Image.Image, source: str,
     # 하단 요소들의 세로 중앙 기준선
     footer_cy = H - 74
 
+    # ── 상단 카테고리 태그(알약) ──
+    if tag:
+        _draw_tag(draw, MARGIN, 150, tag[:6])
+
     # ── 헤드라인 (하단 정렬, 살짝 위로 — 단 화면 중앙보다는 아래) ──
     lines = _wrap(draw, headline, headline_font, W - MARGIN * 2)[:4]
     text_bottom = footer_cy - 140
     y = text_bottom - len(lines) * line_gap
     for line in lines:
-        # 살짝 그림자를 깔아 밝은 사진에서도 읽히게
-        draw.text((MARGIN + 3, y + 3), line, font=headline_font, fill=(0, 0, 0))
-        draw.text((MARGIN, y), line, font=headline_font, fill=WHITE)
+        emph = _emphasize(line, highlight)
+        if emph and style == "marker":
+            # 형광펜: 노란 박스 위에 어두운 글씨
+            tw = draw.textlength(line, font=headline_font)
+            draw.rounded_rectangle([MARGIN - 8, y + 14, MARGIN + tw + 18, y + 96],
+                                   radius=10, fill=HILITE)
+            draw.text((MARGIN, y), line, font=headline_font, fill=DARK)
+        elif emph:
+            # 포인트 컬러 글씨 (그림자로 가독성 확보)
+            draw.text((MARGIN + 3, y + 3), line, font=headline_font, fill=(0, 0, 0))
+            draw.text((MARGIN, y), line, font=headline_font, fill=HILITE)
+        else:
+            draw.text((MARGIN + 3, y + 3), line, font=headline_font, fill=(0, 0, 0))
+            draw.text((MARGIN, y), line, font=headline_font, fill=WHITE)
         y += line_gap
 
     # ── 하단: 출처(좌) · 유튜브로고+브랜드(중앙) · 페이지(우) ──
@@ -173,6 +204,15 @@ def _draw_card(headline: str, background: Image.Image, source: str,
     return img
 
 
+def _draw_tag(draw: ImageDraw.ImageDraw, x, y, text: str):
+    """상단 카테고리 태그(알약 모양)."""
+    f = _brand_font(30)
+    tw = draw.textlength(text, font=f)
+    padx, h = 24, 52
+    draw.rounded_rectangle([x, y, x + tw + padx * 2, y + h], radius=h // 2, fill=ACCENT)
+    draw.text((x + padx, y + h / 2), text, font=f, fill=WHITE, anchor="lm")
+
+
 def _draw_youtube(draw: ImageDraw.ImageDraw, x, y, w, h):
     """유튜브 로고(빨간 라운드 사각형 + 흰 재생 삼각형)를 그립니다."""
     draw.rounded_rectangle([x, y, x + w, y + h], radius=int(h * 0.28), fill=(255, 0, 0))
@@ -192,8 +232,7 @@ def render_cards(cards: list, article: dict, out_prefix: str) -> list:
     paths = []
     total = len(cards)
     for i, card in enumerate(cards):
-        headline = card.get("headline") or card.get("title", "")
-        img = _draw_card(headline, background, source, i, total)
+        img = _draw_card(card, background, source, i, total)
         path = config.CARDS_DIR / f"{out_prefix}_{i + 1}.png"
         img.save(path, "PNG")
         paths.append(path)
