@@ -1,38 +1,62 @@
 # -*- coding: utf-8 -*-
-"""텔레그램 메시지 파싱 — 제목/본문/뉴스링크 분리.
+"""텔레그램 메시지 파싱.
 
-규칙:
-- 첫 줄이 "제목: ..." 형식이면 그 내용을 카페 글 제목으로 사용
-- 아니면 첫 줄이 50자 이하일 때 제목으로 간주
-- 본문에서 URL은 모두 추출해 별도 목록으로 반환 (본문에서는 제거)
+- 맨 앞 키워드로 동작 구분: '카페' → 카페 글, '카드' → 카드뉴스
+- 카페 글: 제목/본문 분리 (링크는 본문 위치 그대로 유지)
+- 카드뉴스: 본문에서 뉴스 링크 추출
 """
 import re
 
 URL_RE = re.compile(r"https?://[^\s<>\"]+")
 TRAILING_PUNCT = ").,>]\"'”’"
 
+CAFE_WORDS = ("카페", "cafe", "글")
+CARD_WORDS = ("카드", "card", "카드뉴스")
 
-def parse_message(text: str):
-    """returns (title, body, links)"""
+
+def detect_mode(text: str):
+    """returns (mode, rest_text). mode ∈ {'cafe','card',None}"""
+    stripped = (text or "").lstrip()
+    # 첫 토큰(공백/줄바꿈/콜론 전까지)
+    head = re.split(r"[\s:：]", stripped, 1)[0].lower()
+    rest = stripped[len(head):].lstrip(" :：\n\t")
+    if head in CAFE_WORDS:
+        return "cafe", rest
+    if head in CARD_WORDS:
+        return "card", rest
+    return None, text
+
+
+def extract_links(text: str):
     links, seen = [], set()
     for raw in URL_RE.findall(text or ""):
         url = raw.rstrip(TRAILING_PUNCT)
         if url not in seen:
             seen.add(url)
             links.append(url)
+    return links
 
-    body = URL_RE.sub("", text or "")
-    lines = [ln.strip() for ln in body.splitlines()]
-    lines = [ln for ln in lines if ln]
+
+def split_title_body(text: str):
+    """카페 글용 — 첫 줄(또는 '제목:' 표기)을 제목으로, 나머지를 본문으로.
+    본문의 링크는 그대로 둔다 (사용자가 편집한 레이아웃 보존)."""
+    lines = (text or "").replace("\r", "").split("\n")
+    # 앞쪽 빈 줄 제거
+    while lines and not lines[0].strip():
+        lines.pop(0)
 
     title = ""
     if lines:
-        first = lines[0]
+        first = lines[0].strip()
         if first.startswith("제목:") or first.startswith("제목 :"):
             title = first.split(":", 1)[1].strip()
             lines = lines[1:]
-        elif len(first) <= 50:
+        elif len(first) <= 50 and URL_RE.search(first) is None:
             title = first
             lines = lines[1:]
 
-    return title, "\n".join(lines), links
+    # 제목 다음 빈 줄 제거
+    while lines and not lines[0].strip():
+        lines.pop(0)
+
+    return title, "\n".join(lines)

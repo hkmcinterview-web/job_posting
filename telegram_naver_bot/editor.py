@@ -1,17 +1,36 @@
 # -*- coding: utf-8 -*-
-"""텔레그램 메시지를 카페 게시글(제목 + HTML 본문)로 편집합니다.
+"""카페 글(제목 + HTML 본문) 편집.
 
-편집 규칙은 이 파일에서 자유롭게 수정하세요:
+사용자가 직접 편집해서 보낸 텍스트의 레이아웃을 최대한 보존합니다:
+- 줄바꿈은 그대로, 빈 줄은 여백으로
+- 링크는 쓴 위치에서 클릭 가능한 링크로
 - POST_HEADER / POST_FOOTER (.env) 가 본문 위/아래에 붙습니다
-- 본문 문단은 <p> 로 감싸고, 링크는 "관련 뉴스" 목록으로 정리합니다
 """
 import datetime as dt
 import html
+import re
 
 import config
 
+URL_RE = re.compile(r"https?://[^\s<>\"]+")
+TRAILING_PUNCT = ").,>]\"'”’"
 
-def build_post(title: str, body: str, articles: list) -> tuple:
+
+def _linkify(line: str) -> str:
+    """한 줄 안의 URL 을 클릭 가능한 <a> 로, 나머지는 HTML 이스케이프."""
+    out, last = [], 0
+    for m in URL_RE.finditer(line):
+        out.append(html.escape(line[last:m.start()]))
+        url = m.group(0).rstrip(TRAILING_PUNCT)
+        trail = m.group(0)[len(url):]
+        out.append(f'<a href="{html.escape(url)}" target="_blank">{html.escape(url)}</a>')
+        out.append(html.escape(trail))
+        last = m.end()
+    out.append(html.escape(line[last:]))
+    return "".join(out)
+
+
+def build_cafe_post(title: str, body: str) -> tuple:
     """returns (subject, content_html)"""
     today = dt.date.today().strftime("%Y.%m.%d")
     subject = title or f"[{today}] {config.BRAND_NAME} 뉴스 브리핑"
@@ -20,19 +39,11 @@ def build_post(title: str, body: str, articles: list) -> tuple:
     if config.POST_HEADER:
         parts.append(config.POST_HEADER)
 
-    for line in (body or "").splitlines():
-        line = line.strip()
-        if line:
-            parts.append(f"<p>{html.escape(line)}</p>")
-
-    if articles:
-        parts.append("<br><p><b>&#128240; 관련 뉴스</b></p>")
-        for i, art in enumerate(articles, 1):
-            t = html.escape(art.get("title", art["url"]))
-            u = html.escape(art["url"])
-            site = html.escape(art.get("site", ""))
-            suffix = f" - {site}" if site else ""
-            parts.append(f'<p>{i}. <a href="{u}" target="_blank">{t}</a>{suffix}</p>')
+    for line in (body or "").replace("\r", "").split("\n"):
+        if line.strip():
+            parts.append(f"<p>{_linkify(line)}</p>")
+        else:
+            parts.append("<br>")
 
     if config.POST_FOOTER:
         parts.append(config.POST_FOOTER)

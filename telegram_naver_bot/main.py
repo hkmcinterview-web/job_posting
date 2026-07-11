@@ -1,12 +1,20 @@
 # -*- coding: utf-8 -*-
 """텔레그램 → 네이버카페 자동 게시 봇 (메인 루프).
 
-흐름:
-  1. 텔레그램 봇으로 온 메시지를 롱폴링으로 수신
-  2. 메시지에서 제목/본문/뉴스링크 분리 (message_parser)
-  3. 각 링크의 기사 내용을 수집 (article) → 링크당 1~3장 카드뉴스 생성 (summarize + card_news)
-  4. 본문을 카페 글 형식으로 편집 (editor) → 카드 이미지와 함께 네이버카페에 게시 (naver_cafe)
-  5. 결과(게시글 URL)와 카드 미리보기를 텔레그램으로 회신
+사용법 (메시지 맨 앞 키워드로 동작 구분):
+
+  ┌ "카페" 로 시작 ─────────────────────────────
+  │ 카페
+  │ 제목: 7월 첫째주 자동차산업 뉴스
+  │ 이번 주 주요 뉴스입니다.
+  │ https://n.news... (원하는 것만 남기고 나머지는 지워서 보내기)
+  └ → 편집한 그대로 네이버 카페에 글로 게시
+
+  ┌ "카드" 로 시작 ─────────────────────────────
+  │ 카드
+  │ https://n.news...   (1~3개)
+  │ https://n.news...
+  └ → 각 링크를 카드뉴스로 만들어 텔레그램으로 회신
 
 실행: python main.py  (24시간 켜져 있는 서버/PC 에서 실행)
 """
@@ -16,48 +24,93 @@ import traceback
 import config
 from article import fetch_article
 from card_news import render_cards
-from editor import build_post
-from message_parser import parse_message
+from editor import build_cafe_post
+from message_parser import detect_mode, extract_links, split_title_body
 from naver_cafe import post_article
 from summarize import build_cards
 from telegram_client import TelegramClient
 
+HELP_TEXT = (
+    "👋 사용법 — 메시지 맨 앞에 키워드를 붙여주세요.\n\n"
+    "📝 카페 글 올리기:\n"
+    "  첫 줄에 '카페' 라고 쓰고, 그 아래에 올릴 내용을 넣으세요.\n"
+    "  (올리기 싫은 뉴스는 직접 지운 뒤 보내면 됩니다)\n"
+    "  예)\n"
+    "  카페\n"
+    "  제목: 오늘의 뉴스\n"
+    "  현대차 하반기 채용 확대\n"
+    "  https://n.news...\n\n"
+    "🖼 카드뉴스 만들기:\n"
+    "  첫 줄에 '카드' 라고 쓰고, 링크 1~3개를 넣으세요.\n"
+    "  예)\n"
+    "  카드\n"
+    "  https://n.news...\n"
+    "  https://n.news..."
+)
 
-def process_text(tg: TelegramClient, chat_id: int, text: str):
-    title, body, links = parse_message(text)
-    links = links[: config.MAX_LINKS]
-    tg.send_message(chat_id, f"⏳ 처리 시작 — 링크 {len(links)}개")
 
-    articles, all_card_paths = [], []
+# ── 카페 글 게시 ─────────────────────────────────────────
+
+def handle_cafe(tg: TelegramClient, chat_id: int, content: str):
+    title, body = split_title_body(content)
+    if not (title or body.strip()):
+        tg.send_message(chat_id, "⚠️ '카페' 아래에 올릴 내용을 함께 보내주세요.")
+        return
+
+    subject, content_html = build_cafe_post(title, body)
+
+    if not config.naver_configured():
+        tg.send_message(chat_id,
+                        "ℹ️ 네이버 API 설정이 아직 없어 카페 게시를 건너뜁니다.\n"
+                        f"(작성될 제목: {subject})\n"
+                        "README 의 '네이버 API 준비' 를 마치면 자동 게시됩니다.")
+        return
+
+    tg.send_message(chat_id, "⏳ 카페에 글을 올리는 중...")
+    result = post_article(subject, content_html, image_paths=None)
+    url = result.get("articleUrl") or "(URL 확인 불가)"
+    tg.send_message(chat_id, f"✅ 카페 게시 완료!\n제목: {subject}\n{url}")
+
+
+# ── 카드뉴스 제작 ────────────────────────────────────────
+
+def handle_card(tg: TelegramClient, chat_id: int, content: str):
+    links = extract_links(content)[: config.MAX_LINKS]
+    if not links:
+        tg.send_message(chat_id, "⚠️ '카드' 아래에 뉴스 링크(1~3개)를 함께 보내주세요.")
+        return
+
+    tg.send_message(chat_id, f"⏳ 카드뉴스 만드는 중 — 링크 {len(links)}개")
     stamp = int(time.time())
+    made = 0
     for idx, url in enumerate(links, 1):
         try:
             art = fetch_article(url)
         except Exception as e:
             tg.send_message(chat_id, f"⚠️ 링크 {idx} 수집 실패({url}): {e}")
-            articles.append({"url": url, "title": url, "site": "", "description": "", "paragraphs": []})
             continue
-        articles.append(art)
-
         try:
             cards = build_cards(art, config.MAX_CARDS_PER_LINK)
             paths = render_cards(cards, art, f"{stamp}_{idx}")
-            all_card_paths.extend(paths)
-            if config.SEND_CARDS_TO_TELEGRAM:
-                for p in paths:
-                    tg.send_photo(chat_id, p, caption=art.get("title", "")[:80])
+            for p in paths:
+                tg.send_photo(chat_id, p, caption=art.get("title", "")[:80])
+            made += len(paths)
         except Exception as e:
             tg.send_message(chat_id, f"⚠️ 링크 {idx} 카드뉴스 생성 실패: {e}")
 
-    subject, content_html = build_post(title, body, articles)
+    tg.send_message(chat_id, f"✅ 카드뉴스 {made}장 완성!")
 
-    if not config.naver_configured():
-        tg.send_message(chat_id, "ℹ️ 네이버 API 설정이 없어 카페 게시는 건너뜁니다. (카드뉴스만 생성)")
-        return
 
-    result = post_article(subject, content_html, all_card_paths)
-    url = result.get("articleUrl") or "(URL 확인 불가)"
-    tg.send_message(chat_id, f"✅ 카페 게시 완료!\n제목: {subject}\n카드뉴스: {len(all_card_paths)}장\n{url}")
+# ── 메인 루프 ────────────────────────────────────────────
+
+def handle_message(tg: TelegramClient, chat_id: int, text: str):
+    mode, content = detect_mode(text)
+    if mode == "cafe":
+        handle_cafe(tg, chat_id, content)
+    elif mode == "card":
+        handle_card(tg, chat_id, content)
+    else:
+        tg.send_message(chat_id, HELP_TEXT)
 
 
 def main():
@@ -91,7 +144,7 @@ def main():
                 print(f"[main] 허용되지 않은 chat_id={chat_id} — 무시")
                 continue
             try:
-                process_text(tg, chat_id, text)
+                handle_message(tg, chat_id, text)
             except Exception as e:
                 traceback.print_exc()
                 try:
