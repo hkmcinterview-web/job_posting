@@ -49,7 +49,20 @@ def main():
         elif r.status_code == 404:
             print("   모델을 못 찾음 → 다음 모델로 재시도...")
         elif r.status_code == 429:
-            print(f"   ⚠️ 사용량 초과(429) — 잠시 뒤 다시 시도하세요.\n   {r.text[:200]}")
+            print("   ⚠️ 사용량 초과(429)")
+            print(f"   전체 응답:\n{r.text}\n")
+            try:
+                err = r.json().get("error", {})
+                for detail in err.get("details", []):
+                    if detail.get("@type", "").endswith("QuotaFailure"):
+                        for v in detail.get("violations", []):
+                            print(f"   → 제한 항목(quotaId): {v.get('quotaId')}")
+                            print(f"   → 설명: {v.get('quotaMetric')}")
+                    if detail.get("@type", "").endswith("Help"):
+                        for link in detail.get("links", []):
+                            print(f"   → 안내: {link.get('url')}")
+            except Exception:
+                pass
             return
         else:
             print(f"   기타 오류:\n   {r.text[:300]}")
