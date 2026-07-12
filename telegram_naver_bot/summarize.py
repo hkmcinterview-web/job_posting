@@ -93,9 +93,10 @@ def _build_cards_gemini(prompt: str) -> list:
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0.9},
     }
-    # 설정 모델을 먼저 시도하고, 실패(404 등)하면 대체 모델들을 순서대로 시도
+    # 설정 모델을 먼저 시도하고, 실패(모델 없음/그 모델만 quota 0 등)하면 대체 모델들을 순서대로 시도
     models, seen = [], set()
-    for m in [config.GEMINI_MODEL, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]:
+    for m in [config.GEMINI_MODEL, "gemini-3.5-flash", "gemini-flash-latest",
+              "gemini-2.5-flash", "gemini-2.0-flash"]:
         if m and m not in seen:
             seen.add(m)
             models.append(m)
@@ -107,6 +108,9 @@ def _build_cards_gemini(prompt: str) -> list:
                              json=payload, timeout=40)
         if resp.status_code == 404:  # 모델 이름 문제 — 다음 후보로
             last_err = f"모델 '{model}' 없음(404)"
+            continue
+        if resp.status_code == 429:  # 이 모델만 quota 0/초과일 수 있음 — 다음 후보로
+            last_err = f"모델 '{model}' 사용량 초과(429)"
             continue
         if resp.status_code != 200:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")

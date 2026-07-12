@@ -38,7 +38,7 @@ NAVER_TOKEN_FILE = BASE_DIR / "naver_tokens.json"
 # ── AI 요약 (선택 — 없으면 og 메타데이터 기반 요약으로 대체) ──
 # ① 구글 Gemini (무료 등급) — aistudio.google.com/apikey 에서 발급
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 # ② Claude (유료)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
