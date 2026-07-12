@@ -33,6 +33,7 @@ def _build_prompt(article: dict, max_cards: int) -> str:
         '  "미국산 칩 생산 드가자\\n브로드컴, 애플과 45조 원\\n계약에 주가 상승"\n'
         '  "일론 머스크 싫으면 빼줌\\n월가, 머스크 기업 제외한\\nETF 준비 중"\n'
         "- 위트는 살리되 과장/왜곡 없이 기사 사실만 담기. 핵심 숫자(금액, 퍼센트)는 살리기\n"
+        "- ⚠️ 문장에 인용부호가 필요하면 반드시 작은따옴표(')만 쓰고, 큰따옴표(\")는 절대 쓰지 말 것 (JSON이 깨짐)\n"
         "- tag: 기사 성격을 나타내는 2~4자 카테고리 (예: 이슈, 속보, 경제, 노동, 증시, 취업, 정치, 국제, IT)\n"
         "- highlight: headline 여러 줄 중 가장 강조하고 싶은 '한 줄'을 그대로 복사 (반드시 headline 안의 한 줄과 정확히 일치)\n"
         "- style: 강조 방식. 강렬한 이슈/속보는 \"marker\"(형광펜), 차분한 정보성은 \"color\"(포인트 컬러)\n"
@@ -44,6 +45,41 @@ def _build_prompt(article: dict, max_cards: int) -> str:
     )
 
 
+def _repair_unescaped_quotes(text: str) -> str:
+    """모델이 문장 안에 이스케이프 안 된 "따옴표"를 써서 JSON이 깨진 경우 복구.
+
+    문자열 안의 큰따옴표(") 뒤에 JSON 구조 문자(: , } ] 나 공백+그 문자)가 오지 않으면
+    '문자열을 진짜로 닫는 따옴표'가 아니라 '문장 속 인용부호'로 보고 이스케이프 처리한다."""
+    out = []
+    in_string = False
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if in_string and ch == "\\" and i + 1 < n:
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        if ch == '"':
+            if not in_string:
+                in_string = True
+                out.append(ch)
+                i += 1
+                continue
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j >= n or text[j] in ":,}]":
+                in_string = False
+                out.append(ch)
+            else:
+                out.append('\\"')  # 문장 속 인용부호로 판단 — 이스케이프
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _extract_cards(text: str) -> list:
     """모델 응답 텍스트에서 JSON 을 뽑아 카드 목록을 반환."""
     text = (text or "").strip()
@@ -51,8 +87,12 @@ def _extract_cards(text: str) -> list:
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if m:
         text = m.group(0)
-    # strict=False: 문자열 안에 실제 줄바꿈이 들어와도 허용
-    data = json.loads(text, strict=False)
+    try:
+        # strict=False: 문자열 안에 실제 줄바꿈이 들어와도 허용
+        data = json.loads(text, strict=False)
+    except json.JSONDecodeError:
+        # 문장 속 이스케이프 안 된 따옴표로 깨진 경우 복구 재시도
+        data = json.loads(_repair_unescaped_quotes(text), strict=False)
     return [c for c in data.get("cards", []) if c.get("headline", "").strip()]
 
 

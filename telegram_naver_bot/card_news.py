@@ -8,6 +8,7 @@
 한글 폰트(Noto Sans CJK KR)는 최초 실행 시 fonts/ 폴더에 자동 다운로드됩니다.
 """
 import io
+import re
 from pathlib import Path
 
 import requests
@@ -15,6 +16,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 import config
 from article import fetch_image_bytes
+
+# 파일명 끝에 크기가 박힌 CDN(예: ..._290.jpg) 대응 — 더 큰 사이즈로 치환 시도
+_SIZE_SUFFIX_RE = re.compile(r"(_)(\d{2,4})(\.\w+)(\?.*)?$")
 
 W, H = 1080, 1350
 MARGIN = 70
@@ -83,15 +87,45 @@ MIN_SOURCE_WIDTH = 640
 MIN_SOURCE_HEIGHT = 500
 
 
-def _fetch_one_image(url: str, referer: str) -> Image.Image:
-    """이미지를 받아 화질 기준을 통과하면 1080x1350 cover 크롭, 아니면 None."""
+def _size_suffix_variants(url: str) -> list:
+    """'..._290.jpg' 처럼 파일명 끝에 크기가 박힌 CDN URL 에서, 더 큰 사이즈 후보를 만든다."""
+    m = _SIZE_SUFFIX_RE.search(url)
+    if not m:
+        return []
+    cur = int(m.group(2))
+    variants = []
+    for size in (720, 960, 1200):
+        if size > cur:
+            variants.append(url[:m.start(2)] + str(size) + url[m.end(2):])
+    return variants
+
+
+def _download(url: str, referer: str) -> Image.Image:
     try:
         raw = fetch_image_bytes(url, referer=referer)
-        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        return Image.open(io.BytesIO(raw)).convert("RGB")
     except Exception as e:
         print(f"[card_news] 이미지 다운로드 실패({url}): {e}")
         return None
 
+
+def _fetch_one_image(url: str, referer: str) -> Image.Image:
+    """이미지를 받아 화질 기준을 통과하면 1080x1350 cover 크롭, 아니면 None.
+
+    파일명에 크기가 박힌 CDN(예: ..._290.jpg)이면 더 큰 사이즈를 자동으로 시도한다."""
+    img = _download(url, referer)
+    if img is not None and (img.width < MIN_SOURCE_WIDTH or img.height < MIN_SOURCE_HEIGHT):
+        print(f"[card_news] 이미지 해상도가 낮아({img.width}x{img.height}) — 더 큰 사이즈 시도: {url}")
+        for bigger_url in _size_suffix_variants(url):
+            bigger = _download(bigger_url, referer)
+            if bigger is not None and bigger.width >= MIN_SOURCE_WIDTH and bigger.height >= MIN_SOURCE_HEIGHT:
+                img = bigger
+                break
+        else:
+            img = None
+
+    if img is None:
+        return None
     if img.width < MIN_SOURCE_WIDTH or img.height < MIN_SOURCE_HEIGHT:
         print(f"[card_news] 이미지 해상도가 낮아({img.width}x{img.height}) 건너뜀: {url}")
         return None
