@@ -15,6 +15,20 @@ HEADERS = {
 # 네이버/다음 등 주요 언론사 본문 컨테이너
 BODY_SELECTORS = "#dic_area, #newsct_article, #articleBodyContents, #article-view-content-div, article"
 
+# 로고/아이콘/광고로 흔히 쓰이는 파일명 패턴 — 본문 이미지 후보에서 제외
+_JUNK_IMG_RE = re.compile(r"(logo|icon|sprite|banner|ad_|_ad\.|btn_|blank\.gif|pixel\.gif)", re.I)
+
+
+def _upsize_cdn_thumbnail(url: str) -> str:
+    """네이버(pstatic) 등 주요 CDN 썸네일 URL 을 원본/고해상도로 변환 시도."""
+    if not url:
+        return url
+    # 네이버 pstatic: ?type=w150 등 리사이즈 파라미터 제거하면 원본에 가까워짐
+    if "pstatic.net" in url and "type=" in url:
+        url = re.sub(r"([?&])type=[^&]*", "", url)
+        url = re.sub(r"[?&]$", "", url).replace("?&", "?")
+    return url
+
 
 def _clean_source(name: str) -> str:
     name = (name or "").strip()
@@ -43,6 +57,28 @@ def fetch_article(url: str) -> dict:
     site = og("site_name") or urlparse(url).netloc
     image_url = og("image")
 
+    # 대표사진(og:image) + 본문 안의 다른 사진들 — 카드가 여러 장일 때 서로 다른 사진을 쓰기 위함
+    image_urls, seen_img = [], set()
+    for src in ([image_url] if image_url else []):
+        u = _upsize_cdn_thumbnail(src)
+        if u and u not in seen_img:
+            seen_img.add(u)
+            image_urls.append(u)
+    body_node = soup.select_one(BODY_SELECTORS)
+    if body_node:
+        for img in body_node.find_all("img"):
+            src = img.get("src") or img.get("data-src") or ""
+            if not src or _JUNK_IMG_RE.search(src):
+                continue
+            if src.startswith("//"):
+                src = "https:" + src
+            src = _upsize_cdn_thumbnail(src)
+            if src not in seen_img:
+                seen_img.add(src)
+                image_urls.append(src)
+            if len(image_urls) >= 8:
+                break
+
     # 출처(언론사명) — 여러 위치를 시도
     source = _clean_source(
         og("article:author") or og("author")
@@ -55,9 +91,8 @@ def fetch_article(url: str) -> dict:
 
     # 본문 — 언론사 본문 컨테이너 우선, 없으면 <p> 태그
     paragraphs = []
-    node = soup.select_one(BODY_SELECTORS)
-    if node:
-        for line in node.get_text("\n", strip=True).split("\n"):
+    if body_node:
+        for line in body_node.get_text("\n", strip=True).split("\n"):
             line = line.strip()
             if len(line) >= 25:
                 paragraphs.append(line)
@@ -78,6 +113,7 @@ def fetch_article(url: str) -> dict:
         "site": site,
         "source": source,
         "image_url": image_url,
+        "image_urls": image_urls,
         "paragraphs": paragraphs,
     }
 

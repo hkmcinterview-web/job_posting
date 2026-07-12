@@ -11,7 +11,7 @@ import io
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 import config
 from article import fetch_image_bytes
@@ -78,29 +78,54 @@ def _brand_font(size: int) -> ImageFont.FreeTypeFont:
         return _font(True, size)
 
 
-def _load_background(article: dict) -> Image.Image:
-    """기사 대표사진을 1080x1350 에 꽉 차게(cover) 크롭. 실패 시 None."""
-    image_url = (article or {}).get("image_url")
-    if not image_url:
-        return None
+# 원본이 이보다 작으면 억지로 늘려 쓰지 않고 깔끔한 단색 배경으로 대체
+MIN_SOURCE_WIDTH = 640
+MIN_SOURCE_HEIGHT = 500
+
+
+def _fetch_one_image(url: str, referer: str) -> Image.Image:
+    """이미지를 받아 화질 기준을 통과하면 1080x1350 cover 크롭, 아니면 None."""
     try:
-        raw = fetch_image_bytes(image_url, referer=article.get("url", ""))
+        raw = fetch_image_bytes(url, referer=referer)
         img = Image.open(io.BytesIO(raw)).convert("RGB")
     except Exception as e:
-        print(f"[card_news] 대표사진 다운로드 실패({image_url}): {e}")
+        print(f"[card_news] 이미지 다운로드 실패({url}): {e}")
         return None
 
-    # cover 크롭
+    if img.width < MIN_SOURCE_WIDTH or img.height < MIN_SOURCE_HEIGHT:
+        print(f"[card_news] 이미지 해상도가 낮아({img.width}x{img.height}) 건너뜀: {url}")
+        return None
+
     scale = max(W / img.width, H / img.height)
     img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
     left = (img.width - W) // 2
     top = (img.height - H) // 2
-    img = img.crop((left, top, left + W, top + H))
+    return img.crop((left, top, left + W, top + H))
 
-    # 원본이 너무 작아 화질이 깨지면 살짝 블러로 완화
-    if scale > 2.5:
-        img = img.filter(ImageFilter.GaussianBlur(2))
-    return img
+
+def load_backgrounds(article: dict, count: int) -> list:
+    """카드 수만큼 배경 이미지를 준비합니다.
+
+    기사에서 찾은 사진 후보(image_urls)를 화질 기준으로 걸러 순서대로 시도하고,
+    카드가 여러 장이면 서로 다른 사진을 배정합니다(사진이 부족하면 마지막 것을 반복).
+    쓸 만한 사진이 하나도 없으면 전부 None(→ 단색 배경 폴백)을 반환합니다.
+    """
+    article = article or {}
+    candidates = list(dict.fromkeys(article.get("image_urls") or
+                                    ([article["image_url"]] if article.get("image_url") else [])))
+    referer = article.get("url", "")
+
+    good = []
+    for url in candidates:
+        img = _fetch_one_image(url, referer)
+        if img is not None:
+            good.append(img)
+        if len(good) >= count:
+            break
+
+    if not good:
+        return [None] * count
+    return [good[min(i, len(good) - 1)] for i in range(count)]
 
 
 def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> list:
@@ -227,12 +252,12 @@ def _draw_youtube(draw: ImageDraw.ImageDraw, x, y, w, h):
 def render_cards(cards: list, article: dict, out_prefix: str) -> list:
     """카드 목록을 PNG 로 렌더링하고 파일 경로 목록을 반환합니다."""
     config.CARDS_DIR.mkdir(parents=True, exist_ok=True)
-    background = _load_background(article)
-    source = (article or {}).get("site", "")
-    paths = []
     total = len(cards)
+    backgrounds = load_backgrounds(article, total)
+    source = (article or {}).get("source") or (article or {}).get("site", "")
+    paths = []
     for i, card in enumerate(cards):
-        img = _draw_card(card, background, source, i, total)
+        img = _draw_card(card, backgrounds[i], source, i, total)
         path = config.CARDS_DIR / f"{out_prefix}_{i + 1}.png"
         img.save(path, "PNG")
         paths.append(path)
