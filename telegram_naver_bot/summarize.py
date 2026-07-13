@@ -6,12 +6,25 @@
 
 카드(후보) 1개 = {"headline": "...", "tag": "...", "highlight": "...", "style": "marker"}
 
+모델 응답 포맷: JSON 대신 마커로 구분된 일반 텍스트를 씁니다.
+  <<<CARD>>>
+  TAG: 이슈
+  HIGHLIGHT: 법안 철회
+  STYLE: marker
+  HEADLINE:
+  노동계 대폭발에 화들짝
+  '성과급 지역화폐 지급법'
+  법안 철회
+  <<<END>>>
+JSON은 헤드라인 문장에 큰따옴표가 하나만 들어가도 파싱이 깨지는 문제가 반복돼서
+(문장 안 인용부호 vs JSON 문자열 종료를 구분하기 어려움) 이 방식으로 바꿨습니다 —
+HEADLINE 은 <<<END>>> 직전까지 전부 그대로 읽으므로 문장 안에 어떤 문자가 와도 안전합니다.
+
 요약 엔진 우선순위:
   1) GEMINI_API_KEY 있으면 → 구글 Gemini (무료 등급)
   2) ANTHROPIC_API_KEY 있으면 → Claude (유료)
   3) 둘 다 없으면 → 기사 제목 기반 휴리스틱 (무료, 후보 1개만 — 고를 필요 없이 바로 사용)
 """
-import json
 import re
 
 import requests
@@ -27,77 +40,82 @@ def _build_prompt(article: dict, n_options: int) -> str:
         "기사 사진 위에 큰 글씨로 얹는 형식이라 문장이 짧고 눈에 확 들어와야 합니다.\n"
         f"같은 카드에 쓸 서로 다른 톤/문구의 헤드라인 후보를 정확히 {n_options}개 제안해 주세요.\n"
         "(순차적인 여러 포인트가 아니라, 같은 기사 내용을 표현하는 서로 다른 버전입니다)\n\n"
-        "규칙:\n"
+        "내용 규칙:\n"
         "- ⚠️ 기사 제목을 그대로 베끼지 말 것! 본문 내용을 파악해서 새로 쓴 센스있는 문장이어야 함\n"
-        "- headline 은 2~3줄, 각 줄 8~14자, 줄바꿈 위치는 의미 단위로 자연스럽게 (\\n 사용)\n"
+        "- HEADLINE 은 2~3줄, 각 줄 8~14자, 줄바꿈 위치는 의미 단위로 자연스럽게\n"
         "- 첫 줄은 후킹하는 한마디(반응/요점), 이어지는 줄에서 핵심 사실 전달\n"
         "- 커뮤니티 카드뉴스처럼 딱딱하지 않고 위트있게. 예시 톤:\n"
-        '  "노동계 대폭발에 화들짝\\n\'성과급 지역화폐 지급법\'\\n법안 철회"\n'
-        '  "미국산 칩 생산 드가자\\n브로드컴, 애플과 45조 원\\n계약에 주가 상승"\n'
-        '  "일론 머스크 싫으면 빼줌\\n월가, 머스크 기업 제외한\\nETF 준비 중"\n'
+        "    노동계 대폭발에 화들짝\n"
+        "    '성과급 지역화폐 지급법'\n"
+        "    법안 철회\n"
         "- 위트는 살리되 과장/왜곡 없이 기사 사실만 담기. 핵심 숫자(금액, 퍼센트)는 살리기\n"
-        "- ⚠️ 문장에 인용부호가 필요하면 반드시 작은따옴표(')만 쓰고, 큰따옴표(\")는 절대 쓰지 말 것 (JSON이 깨짐)\n"
-        "- tag: 기사 성격을 나타내는 2~4자 카테고리 (예: 이슈, 속보, 경제, 노동, 증시, 취업, 정치, 국제, IT)\n"
-        "- highlight: headline 여러 줄 중 가장 강조하고 싶은 '한 줄'을 그대로 복사 (반드시 headline 안의 한 줄과 정확히 일치)\n"
-        "- style: 강조 방식. 강렬한 이슈/속보는 \"marker\"(형광펜), 차분한 정보성은 \"color\"(포인트 컬러)\n"
         f"- {n_options}개 후보는 서로 눈에 띄게 다른 각도/톤이어야 함 (예: 반응 위주 / 숫자 강조 / 임팩트 문구)\n"
-        '- 반드시 아래 JSON 형식으로만 답하기 (다른 말 없이):\n'
-        '  {"cards": [{"headline": "...", "tag": "...", "highlight": "...", "style": "marker"}, ...]}\n\n'
+        "- TAG: 기사 성격을 나타내는 2~4자 카테고리 (예: 이슈, 속보, 경제, 노동, 증시, 취업, 정치, 국제, IT)\n"
+        "- HIGHLIGHT: HEADLINE 여러 줄 중 가장 강조하고 싶은 '한 줄'을 그대로 복사 (HEADLINE 안의 한 줄과 정확히 일치)\n"
+        "- STYLE: marker(형광펜 — 강렬한 이슈/속보) 또는 color(포인트 컬러 — 차분한 정보성) 중 하나\n\n"
+        "출력 형식 — 아래 형식을 정확히 지켜서, 다른 설명/인사말 없이 후보 수만큼 블록을 반복하세요.\n"
+        "각 블록은 반드시 TAG → HIGHLIGHT → STYLE → HEADLINE 순서이고, HEADLINE 은 항상 블록의 마지막이며\n"
+        "<<<END>>> 바로 앞까지 나오는 모든 줄이 헤드라인 내용입니다 (따옴표 등 어떤 문장부호를 써도 됩니다):\n\n"
+        "<<<CARD>>>\n"
+        "TAG: (태그)\n"
+        "HIGHLIGHT: (강조할 한 줄)\n"
+        "STYLE: marker 또는 color\n"
+        "HEADLINE:\n"
+        "(첫째 줄)\n"
+        "(둘째 줄)\n"
+        "(셋째 줄, 필요하면)\n"
+        "<<<END>>>\n"
+        f"(이 블록을 총 {n_options}번 반복)\n\n"
         f"[기사 제목] {article.get('title', '')}\n"
         f"[요약] {article.get('description', '')}\n"
         f"[본문]\n{body}"
     )
 
 
-def _repair_unescaped_quotes(text: str) -> str:
-    """모델이 문장 안에 이스케이프 안 된 "따옴표"를 써서 JSON이 깨진 경우 복구.
-
-    문자열 안의 큰따옴표(") 뒤에 JSON 구조 문자(: , } ] 나 공백+그 문자)가 오지 않으면
-    '문자열을 진짜로 닫는 따옴표'가 아니라 '문장 속 인용부호'로 보고 이스케이프 처리한다."""
-    out = []
-    in_string = False
-    i, n = 0, len(text)
-    while i < n:
-        ch = text[i]
-        if in_string and ch == "\\" and i + 1 < n:
-            out.append(text[i:i + 2])
-            i += 2
-            continue
-        if ch == '"':
-            if not in_string:
-                in_string = True
-                out.append(ch)
-                i += 1
-                continue
-            j = i + 1
-            while j < n and text[j] in " \t\r\n":
-                j += 1
-            if j >= n or text[j] in ":,}]":
-                in_string = False
-                out.append(ch)
-            else:
-                out.append('\\"')  # 문장 속 인용부호로 판단 — 이스케이프
-            i += 1
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
+_CARD_BLOCK_RE = re.compile(r"<{2,3}\s*CARD\s*>{2,3}(.*?)<{2,3}\s*END\s*>{2,3}",
+                            re.DOTALL | re.IGNORECASE)
+_HEADLINE_LABEL_RE = re.compile(r"HEADLINE\s*:\s*\n?", re.IGNORECASE)
+_TAG_RE = re.compile(r"^\s*TAG\s*:\s*(.*)$", re.IGNORECASE)
+_HIGHLIGHT_RE = re.compile(r"^\s*HIGHLIGHT\s*:\s*(.*)$", re.IGNORECASE)
+_STYLE_RE = re.compile(r"^\s*STYLE\s*:\s*(.*)$", re.IGNORECASE)
 
 
 def _extract_cards(text: str) -> list:
-    """모델 응답 텍스트에서 JSON 을 뽑아 헤드라인 후보 목록을 반환."""
-    text = (text or "").strip()
-    # ```json ... ``` 코드블록 안에 넣는 모델 대비
-    m = re.search(r"\{.*\}", text, re.DOTALL)
-    if m:
-        text = m.group(0)
-    try:
-        # strict=False: 문자열 안에 실제 줄바꿈이 들어와도 허용
-        data = json.loads(text, strict=False)
-    except json.JSONDecodeError:
-        # 문장 속 이스케이프 안 된 따옴표로 깨진 경우 복구 재시도
-        data = json.loads(_repair_unescaped_quotes(text), strict=False)
-    return [c for c in data.get("cards", []) if c.get("headline", "").strip()]
+    """모델 응답에서 <<<CARD>>>...<<<END>>> 블록들을 뽑아 헤드라인 후보 목록으로 변환.
+
+    JSON을 쓰지 않으므로 헤드라인 문장 안에 어떤 따옴표/문장부호가 있어도 깨지지 않는다.
+    """
+    cards = []
+    for block_match in _CARD_BLOCK_RE.finditer(text or ""):
+        block = block_match.group(1)
+        head_label = _HEADLINE_LABEL_RE.search(block)
+        meta = block[:head_label.start()] if head_label else block
+        headline = block[head_label.end():].strip("\n").strip() if head_label else ""
+
+        tag = highlight = style = ""
+        for line in meta.split("\n"):
+            line = line.strip()
+            m = _TAG_RE.match(line)
+            if m:
+                tag = m.group(1).strip()
+                continue
+            m = _HIGHLIGHT_RE.match(line)
+            if m:
+                highlight = m.group(1).strip()
+                continue
+            m = _STYLE_RE.match(line)
+            if m:
+                style = m.group(1).strip()
+
+        if headline:
+            style_norm = style.strip().lower()
+            cards.append({
+                "headline": headline,
+                "tag": tag,
+                "highlight": highlight,
+                "style": style_norm if style_norm in ("marker", "color") else "marker",
+            })
+    return cards
 
 
 def build_card_options(article: dict, n_options: int = 3):
@@ -138,7 +156,7 @@ def build_card_options(article: dict, n_options: int = 3):
 def _build_cards_gemini(prompt: str) -> list:
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.9},
+        "generationConfig": {"temperature": 0.9},
     }
     # 설정 모델을 먼저 시도하고, 실패(모델 없음/그 모델만 quota 0 등)하면 대체 모델들을 순서대로 시도
     models, seen = [], set()
@@ -176,32 +194,10 @@ def _build_cards_gemini(prompt: str) -> list:
 def _build_cards_claude(prompt: str) -> list:
     import anthropic
 
-    schema = {
-        "type": "object",
-        "properties": {
-            "cards": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "headline": {"type": "string"},
-                        "tag": {"type": "string"},
-                        "highlight": {"type": "string"},
-                        "style": {"type": "string", "enum": ["marker", "color"]},
-                    },
-                    "required": ["headline", "tag", "highlight", "style"],
-                    "additionalProperties": False,
-                },
-            }
-        },
-        "required": ["cards"],
-        "additionalProperties": False,
-    }
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     response = client.messages.create(
         model=config.ANTHROPIC_MODEL,
         max_tokens=2048,
-        output_config={"format": {"type": "json_schema", "schema": schema}},
         messages=[{"role": "user", "content": prompt}],
     )
     if response.stop_reason == "refusal":
