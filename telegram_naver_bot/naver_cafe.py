@@ -51,10 +51,17 @@ def _get_access_token() -> str:
     return tokens["access_token"]
 
 
+def _encode_field(text: str) -> str:
+    """네이버 카페 글쓰기 API 는 legacy API 라 subject/content 를 EUC-KR(CP949) 로
+    인코딩한 뒤 퍼센트 인코딩해서 보내야 합니다. UTF-8 로 보내면 한글이 깨집니다."""
+    return quote((text or "").encode("cp949", errors="replace"), safe="")
+
+
 def post_article(subject: str, content_html: str, image_paths=None) -> dict:
     """카페에 글을 작성하고 {'articleId': ..., 'articleUrl': ...} 를 반환합니다.
 
-    네이버 카페 API 규격상 subject/content 는 UTF-8 URL 인코딩해서 보내야 합니다.
+    네이버 카페 API 는 subject/content 를 EUC-KR(CP949) 인코딩 후 URL 인코딩해서 받는
+    legacy 규격입니다 (UTF-8 로 보내면 한글이 깨짐).
     이미지는 multipart 'image' 필드로 첨부하면 글에 함께 게시됩니다.
     """
     token = _get_access_token()
@@ -63,8 +70,8 @@ def post_article(subject: str, content_html: str, image_paths=None) -> dict:
     print(f"[naver_cafe] 요청 URL: {url}  (clubid={config.NAVER_CAFE_CLUB_ID}, "
           f"menuid={config.NAVER_CAFE_MENU_ID})")
     data = {
-        "subject": quote(subject, safe=""),
-        "content": quote(content_html, safe=""),
+        "subject": _encode_field(subject),
+        "content": _encode_field(content_html),
     }
 
     def _send(access_token):
