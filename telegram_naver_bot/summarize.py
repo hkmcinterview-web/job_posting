@@ -194,6 +194,9 @@ def _build_cards_gemini(prompt: str):
         if resp.status_code == 429:  # 이 모델만 quota 0/초과일 수 있음 — 다음 후보로
             last_err = f"모델 '{model}' 사용량 초과(429)"
             continue
+        if resp.status_code == 503:  # 모델 일시 과부하 — 다음 후보로
+            last_err = f"모델 '{model}' 일시 과부하(503)"
+            continue
         if resp.status_code != 200:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
         data = resp.json()
