@@ -7,7 +7,9 @@
 
 사용법: python test_naver_encoding.py
 """
-from urllib.parse import quote
+import urllib.error
+import urllib.request
+from urllib.parse import quote, urlencode
 
 import requests
 
@@ -80,6 +82,39 @@ def _post_multipart(label: str) -> str:
     return _do(_send)
 
 
+def _post_urllib(label: str) -> str:
+    """requests 대신 urllib.request + urlencode() 로 보내는 방식 (사용자 제안).
+    urlencode() 는 내부적으로 quote_plus 를 한 번만 적용 — enc_utf8_single 과
+    거의 같은 인코딩 결과지만, 헤더 처리 등 라이브러리 차이가 있어 별도로 검증."""
+    url = (f"https://openapi.naver.com/v1/cafe/{config.NAVER_CAFE_CLUB_ID}"
+           f"/menu/{config.NAVER_CAFE_MENU_ID}/articles")
+    subject = f"[TEST-{label}]"
+    content = f"[TEST-{label}] {TEST_KOREAN}"
+    data = urlencode({"subject": subject, "content": content}).encode("utf-8")
+
+    def _send(token):
+        request = urllib.request.Request(url, data=data, method="POST")
+        request.add_header("Authorization", f"Bearer {token}")
+        request.add_header("Content-Type", "application/x-www-form-urlencoded")
+        try:
+            with urllib.request.urlopen(request, timeout=60) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    status, body = _send(_get_access_token())
+    if status == 401:
+        tokens = refresh_access_token(load_tokens())
+        status, body = _send(tokens["access_token"])
+
+    if status != 200:
+        return f"❌ 실패 (HTTP {status}): {body.decode('utf-8', errors='replace')[:200]}"
+
+    import json
+    result = json.loads(body.decode("utf-8")).get("message", {}).get("result", {})
+    return f"✅ {result.get('articleUrl') or result.get('cafeUrl') or '(URL 확인 불가)'}"
+
+
 def _do(send_fn) -> str:
     token = _get_access_token()
     resp = send_fn(token)
@@ -103,8 +138,11 @@ def main():
     print("[E-멀티파트] 게시 중...")
     print("  →", _post_multipart("E-멀티파트"))
 
+    print("[F-urllib] 게시 중...")
+    print("  →", _post_urllib("F-urllib"))
+
     print("\n위 글들을 카페에서 열어보고, 한글이 정상으로 보이는 게 있으면")
-    print("그 라벨(A/B/C/D/E)을 알려주세요. 전부 깨져 있으면 그것도 알려주세요.")
+    print("그 라벨(A/B/C/D/E/F)을 알려주세요. 전부 깨져 있으면 그것도 알려주세요.")
 
 
 if __name__ == "__main__":
