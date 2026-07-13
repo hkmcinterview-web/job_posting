@@ -96,8 +96,11 @@ def _format_options(options: list) -> str:
 
 
 def _send_summary_text(tg: TelegramClient, chat_id: int, art: dict, summary: str):
-    """카드뉴스 업로드 시 캡션으로 바로 쓸 수 있게, 요약 + 출처 링크를 별도 메시지로 전송."""
+    """카드뉴스 업로드 시 캡션으로 바로 쓸 수 있게, 제목 + 요약 + 출처 링크를 별도 메시지로 전송."""
     parts = []
+    title = art.get("title") or ""
+    if title:
+        parts.append(f"📰 {title}")
     if summary:
         parts.append(f"📝 요약\n{summary}")
     url = art.get("url", "")
