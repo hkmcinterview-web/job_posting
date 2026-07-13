@@ -52,16 +52,18 @@ def _get_access_token() -> str:
 
 
 def _encode_field(text: str) -> str:
-    """네이버 카페 글쓰기 API 는 legacy API 라 subject/content 를 EUC-KR(CP949) 로
-    인코딩한 뒤 퍼센트 인코딩해서 보내야 합니다. UTF-8 로 보내면 한글이 깨집니다."""
-    return quote((text or "").encode("cp949", errors="replace"), safe="")
+    """subject/content 인코딩. 실측 결과 네이버 API는 UTF-8을 '한 번만' 퍼센트
+    인코딩한 값만 정상 접수합니다 (CP949·이중 인코딩은 HTTP 403/999로 거부됨).
+    표시 단계에서 여전히 깨져 보이는 문제는 별도 원인(카페 페이지 인코딩 추정 등)을
+    진단 중입니다 — test_naver_read.py 참고."""
+    return quote((text or "").encode("utf-8"), safe="")
 
 
 def post_article(subject: str, content_html: str, image_paths=None) -> dict:
     """카페에 글을 작성하고 {'articleId': ..., 'articleUrl': ...} 를 반환합니다.
 
-    네이버 카페 API 는 subject/content 를 EUC-KR(CP949) 인코딩 후 URL 인코딩해서 받는
-    legacy 규격입니다 (UTF-8 로 보내면 한글이 깨짐).
+    subject/content 는 UTF-8로 인코딩 후 퍼센트 인코딩 1회만 적용해서 보냅니다
+    (CP949·이중 인코딩은 서버가 HTTP 403/999로 거부하는 것을 실측으로 확인함).
 
     ⚠️ 이미지 없이 보낼 때(x-www-form-urlencoded)는 이미 퍼센트 인코딩된 문자열을
     requests 의 data=dict 로 넘기면 안 됩니다 — requests 가 폼 인코딩 과정에서
