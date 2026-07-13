@@ -60,6 +60,8 @@ def post_article(subject: str, content_html: str, image_paths=None) -> dict:
     token = _get_access_token()
     url = (f"https://openapi.naver.com/v1/cafe/{config.NAVER_CAFE_CLUB_ID}"
            f"/menu/{config.NAVER_CAFE_MENU_ID}/articles")
+    print(f"[naver_cafe] 요청 URL: {url}  (clubid={config.NAVER_CAFE_CLUB_ID}, "
+          f"menuid={config.NAVER_CAFE_MENU_ID})")
     data = {
         "subject": quote(subject, safe=""),
         "content": quote(content_html, safe=""),
