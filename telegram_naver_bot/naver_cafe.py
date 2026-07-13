@@ -62,29 +62,43 @@ def post_article(subject: str, content_html: str, image_paths=None) -> dict:
 
     네이버 카페 API 는 subject/content 를 EUC-KR(CP949) 인코딩 후 URL 인코딩해서 받는
     legacy 규격입니다 (UTF-8 로 보내면 한글이 깨짐).
-    이미지는 multipart 'image' 필드로 첨부하면 글에 함께 게시됩니다.
+
+    ⚠️ 이미지 없이 보낼 때(x-www-form-urlencoded)는 이미 퍼센트 인코딩된 문자열을
+    requests 의 data=dict 로 넘기면 안 됩니다 — requests 가 폼 인코딩 과정에서
+    '%' 문자까지 다시 인코딩해버려 이중 인코딩되고, 네이버 서버가 이를 못 알아들어
+    글 자체가 등록되지 않습니다. 그래서 문자열을 직접 조립해 raw bytes 로 보냅니다.
+    이미지가 있으면(multipart) 이 문제가 없어 원본 텍스트를 그대로 보냅니다.
     """
     token = _get_access_token()
     url = (f"https://openapi.naver.com/v1/cafe/{config.NAVER_CAFE_CLUB_ID}"
            f"/menu/{config.NAVER_CAFE_MENU_ID}/articles")
     print(f"[naver_cafe] 요청 URL: {url}  (clubid={config.NAVER_CAFE_CLUB_ID}, "
           f"menuid={config.NAVER_CAFE_MENU_ID})")
-    data = {
-        "subject": _encode_field(subject),
-        "content": _encode_field(content_html),
-    }
 
     def _send(access_token):
-        files = []
+        headers = {"Authorization": f"Bearer {access_token}"}
+        opened_files = []
         try:
-            for p in (image_paths or []):
-                files.append(("image", (p.name, open(p, "rb"), "image/png")))
-            return requests.post(url, data=data, files=files or None,
-                                 headers={"Authorization": f"Bearer {access_token}"},
-                                 timeout=60)
+            if image_paths:
+                files = []
+                for p in image_paths:
+                    f = open(p, "rb")
+                    opened_files.append(f)
+                    files.append(("image", (p.name, f, "image/png")))
+                # 멀티파트는 이중 인코딩 문제가 없어 원본 텍스트를 그대로 보냄
+                req_data = {"subject": subject, "content": content_html}
+                return requests.post(url, data=req_data, files=files,
+                                     headers=headers, timeout=60)
+
+            # 이미지 없음 — CP949 로 인코딩한 뒤, 이중 인코딩을 피하기 위해
+            # dict 가 아니라 완성된 문자열을 raw bytes 로 직접 전송
+            payload = f"subject={_encode_field(subject)}&content={_encode_field(content_html)}"
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+            return requests.post(url, data=payload.encode("utf-8"),
+                                 headers=headers, timeout=60)
         finally:
-            for _, (_, fh, _) in files:
-                fh.close()
+            for f in opened_files:
+                f.close()
 
     resp = _send(token)
     if resp.status_code == 401:  # 토큰 만료 — 갱신 후 1회 재시도
