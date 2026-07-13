@@ -15,6 +15,7 @@
   │ https://n.news...   (1~3개)
   │ https://n.news...
   └ → 링크마다 헤드라인 후보를 2~3개 제안 → 숫자로 답장하면 그걸로 카드 1장 생성
+      카드 뒤에는 기사 요약 + 출처 링크를 별도 메시지로 보내드립니다 (캡션용)
       (AI 가 없어서 후보가 1개뿐이면 고를 필요 없이 바로 생성)
 
 실행: python main.py  (24시간 켜져 있는 서버/PC 에서 실행)
@@ -56,7 +57,7 @@ N_OPTIONS = max(2, min(3, config.MAX_CARDS_PER_LINK or 3))
 
 # chat_id 별로 "카드 후보 선택 대기" 상태를 들고 있음 (봇 재시작 시 초기화됨)
 # {chat_id: {"queue": [url, ...], "link_idx": int, "made": int, "stamp": int,
-#            "article": dict|None, "options": list|None}}
+#            "article": dict|None, "options": list|None, "summary": str|None}}
 PENDING_CARD: dict = {}
 
 
@@ -94,6 +95,18 @@ def _format_options(options: list) -> str:
     return "\n".join(lines)
 
 
+def _send_summary_text(tg: TelegramClient, chat_id: int, art: dict, summary: str):
+    """카드뉴스 업로드 시 캡션으로 바로 쓸 수 있게, 요약 + 출처 링크를 별도 메시지로 전송."""
+    parts = []
+    if summary:
+        parts.append(f"📝 요약\n{summary}")
+    url = art.get("url", "")
+    if url:
+        parts.append(f"\n출처: {url}")
+    if parts:
+        tg.send_message(chat_id, "\n".join(parts))
+
+
 def _finish_link(tg: TelegramClient, chat_id: int, card: dict, art: dict, state: dict):
     """선택(또는 자동 확정)된 카드 1장을 렌더링해서 보내고 다음 링크로 진행."""
     try:
@@ -101,6 +114,7 @@ def _finish_link(tg: TelegramClient, chat_id: int, card: dict, art: dict, state:
         for p in paths:
             tg.send_photo(chat_id, p, caption=art.get("title", "")[:80])
         state["made"] += len(paths)
+        _send_summary_text(tg, chat_id, art, state.get("summary") or "")
     except Exception as e:
         tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 카드뉴스 생성 실패: {e}")
     _advance(tg, chat_id)
@@ -113,6 +127,7 @@ def _advance(tg: TelegramClient, chat_id: int):
         return
     state["article"] = None
     state["options"] = None
+    state["summary"] = None
 
     if not state["queue"]:
         tg.send_message(chat_id, f"✅ 카드뉴스 {state['made']}장 완성!")
@@ -129,11 +144,13 @@ def _advance(tg: TelegramClient, chat_id: int):
         return
 
     try:
-        options, engine, err = build_card_options(art, N_OPTIONS)
+        options, engine, err, summary = build_card_options(art, N_OPTIONS)
     except Exception as e:
         tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 요약 실패: {e}")
         _advance(tg, chat_id)
         return
+
+    state["summary"] = summary
 
     if len(options) <= 1:
         # AI 를 못 썼거나 실패 — 고를 필요 없이 바로 그 하나로 카드 생성
@@ -161,6 +178,7 @@ def handle_card(tg: TelegramClient, chat_id: int, content: str):
         "stamp": int(time.time()),
         "article": None,
         "options": None,
+        "summary": None,
     }
     tg.send_message(chat_id, f"⏳ 카드뉴스 준비 중 — 링크 {len(links)}개")
     _advance(tg, chat_id)

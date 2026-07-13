@@ -39,7 +39,12 @@ def _build_prompt(article: dict, n_options: int) -> str:
         "다음 뉴스 기사로 SNS 카드뉴스를 1장 만들 겁니다.\n"
         "기사 사진 위에 큰 글씨로 얹는 형식이라 문장이 짧고 눈에 확 들어와야 합니다.\n"
         f"같은 카드에 쓸 서로 다른 톤/문구의 헤드라인 후보를 정확히 {n_options}개 제안해 주세요.\n"
-        "(순차적인 여러 포인트가 아니라, 같은 기사 내용을 표현하는 서로 다른 버전입니다)\n\n"
+        "(순차적인 여러 포인트가 아니라, 같은 기사 내용을 표현하는 서로 다른 버전입니다)\n"
+        "추가로, 카드뉴스와 함께 SNS(인스타그램 등)에 올릴 때 쓸 기사 요약문도 하나 만들어 주세요.\n\n"
+        "요약문(SUMMARY) 규칙:\n"
+        "- 3~5문장, 존댓말/신문투 없이 자연스러운 소셜미디어 캡션 톤\n"
+        "- 기사의 핵심 사실을 과장·왜곡 없이 담기 (숫자·날짜 등 구체적 정보 유지)\n"
+        "- 해시태그나 이모지는 넣지 말 것 (텍스트만)\n\n"
         "내용 규칙:\n"
         "- ⚠️ 기사 제목을 그대로 베끼지 말 것! 본문 내용을 파악해서 새로 쓴 센스있는 문장이어야 함\n"
         "- HEADLINE 은 2~3줄, 각 줄 8~14자, 줄바꿈 위치는 의미 단위로 자연스럽게\n"
@@ -53,9 +58,13 @@ def _build_prompt(article: dict, n_options: int) -> str:
         "- TAG: 기사 성격을 나타내는 2~4자 카테고리 (예: 이슈, 속보, 경제, 노동, 증시, 취업, 정치, 국제, IT)\n"
         "- HIGHLIGHT: HEADLINE 여러 줄 중 가장 강조하고 싶은 '한 줄'을 그대로 복사 (HEADLINE 안의 한 줄과 정확히 일치)\n"
         "- STYLE: marker(형광펜 — 강렬한 이슈/속보) 또는 color(포인트 컬러 — 차분한 정보성) 중 하나\n\n"
-        "출력 형식 — 아래 형식을 정확히 지켜서, 다른 설명/인사말 없이 후보 수만큼 블록을 반복하세요.\n"
-        "각 블록은 반드시 TAG → HIGHLIGHT → STYLE → HEADLINE 순서이고, HEADLINE 은 항상 블록의 마지막이며\n"
+        "출력 형식 — 아래 형식을 정확히 지켜서, 다른 설명/인사말 없이 작성하세요.\n"
+        "먼저 SUMMARY 블록을 한 번 쓰고, 그 다음 CARD 블록을 후보 수만큼 반복하세요.\n"
+        "각 CARD 블록은 반드시 TAG → HIGHLIGHT → STYLE → HEADLINE 순서이고, HEADLINE 은 항상 블록의 마지막이며\n"
         "<<<END>>> 바로 앞까지 나오는 모든 줄이 헤드라인 내용입니다 (따옴표 등 어떤 문장부호를 써도 됩니다):\n\n"
+        "<<<SUMMARY>>>\n"
+        "(3~5문장 요약)\n"
+        "<<<END>>>\n\n"
         "<<<CARD>>>\n"
         "TAG: (태그)\n"
         "HIGHLIGHT: (강조할 한 줄)\n"
@@ -65,7 +74,7 @@ def _build_prompt(article: dict, n_options: int) -> str:
         "(둘째 줄)\n"
         "(셋째 줄, 필요하면)\n"
         "<<<END>>>\n"
-        f"(이 블록을 총 {n_options}번 반복)\n\n"
+        f"(CARD 블록을 총 {n_options}번 반복)\n\n"
         f"[기사 제목] {article.get('title', '')}\n"
         f"[요약] {article.get('description', '')}\n"
         f"[본문]\n{body}"
@@ -74,10 +83,18 @@ def _build_prompt(article: dict, n_options: int) -> str:
 
 _CARD_BLOCK_RE = re.compile(r"<{2,3}\s*CARD\s*>{2,3}(.*?)<{2,3}\s*END\s*>{2,3}",
                             re.DOTALL | re.IGNORECASE)
+_SUMMARY_BLOCK_RE = re.compile(r"<{2,3}\s*SUMMARY\s*>{2,3}(.*?)<{2,3}\s*END\s*>{2,3}",
+                               re.DOTALL | re.IGNORECASE)
 _HEADLINE_LABEL_RE = re.compile(r"HEADLINE\s*:\s*\n?", re.IGNORECASE)
 _TAG_RE = re.compile(r"^\s*TAG\s*:\s*(.*)$", re.IGNORECASE)
 _HIGHLIGHT_RE = re.compile(r"^\s*HIGHLIGHT\s*:\s*(.*)$", re.IGNORECASE)
 _STYLE_RE = re.compile(r"^\s*STYLE\s*:\s*(.*)$", re.IGNORECASE)
+
+
+def _extract_summary(text: str) -> str:
+    """모델 응답에서 <<<SUMMARY>>>...<<<END>>> 블록을 뽑아 요약 텍스트로 반환."""
+    m = _SUMMARY_BLOCK_RE.search(text or "")
+    return m.group(1).strip() if m else ""
 
 
 def _extract_cards(text: str) -> list:
@@ -119,9 +136,9 @@ def _extract_cards(text: str) -> list:
 
 
 def build_card_options(article: dict, n_options: int = 3):
-    """카드 1장에 쓸 헤드라인 후보를 n_options개 만든다.
+    """카드 1장에 쓸 헤드라인 후보 + 기사 요약문을 만든다.
 
-    returns (options, engine, error)
+    returns (options, engine, error, summary)
     engine ∈ {'gemini','claude','heuristic'}, error 는 AI 실패 사유(없으면 "").
     AI 를 못 쓰면 후보 1개(제목 기반)만 돌려준다 — 이 경우 호출 측에서 선택 없이 바로 사용하면 된다."""
     n_options = max(2, min(3, n_options))
@@ -130,9 +147,9 @@ def build_card_options(article: dict, n_options: int = 3):
 
     if config.GEMINI_API_KEY:
         try:
-            options = _build_cards_gemini(prompt)
+            summary, options = _build_cards_gemini(prompt)
             if options:
-                return options[:n_options], "gemini", ""
+                return options[:n_options], "gemini", "", summary
             error = "Gemini 응답에 후보가 없음"
         except Exception as e:
             error = f"Gemini: {e}"
@@ -140,20 +157,20 @@ def build_card_options(article: dict, n_options: int = 3):
 
     if config.ANTHROPIC_API_KEY:
         try:
-            options = _build_cards_claude(prompt)
+            summary, options = _build_cards_claude(prompt)
             if options:
-                return options[:n_options], "claude", ""
+                return options[:n_options], "claude", "", summary
             error = error or "Claude 응답에 후보가 없음"
         except Exception as e:
             error = f"Claude: {e}"
             print(f"[summarize] Claude 요약 실패, 휴리스틱으로 대체: {e}")
 
-    return _build_cards_heuristic(article), "heuristic", error
+    return _build_cards_heuristic(article), "heuristic", error, _heuristic_summary(article)
 
 
 # ── ① 구글 Gemini (무료 등급) ────────────────────────────
 
-def _build_cards_gemini(prompt: str) -> list:
+def _build_cards_gemini(prompt: str):
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.9},
@@ -184,14 +201,15 @@ def _build_cards_gemini(prompt: str) -> list:
         if not candidates:
             raise RuntimeError(f"응답 비어있음(안전필터 가능): {str(data)[:200]}")
         parts = candidates[0].get("content", {}).get("parts", [])
-        return _extract_cards("".join(p.get("text", "") for p in parts))
+        text = "".join(p.get("text", "") for p in parts)
+        return _extract_summary(text), _extract_cards(text)
 
     raise RuntimeError(last_err or "사용 가능한 Gemini 모델 없음")
 
 
 # ── ② Claude API (유료) ──────────────────────────────────
 
-def _build_cards_claude(prompt: str) -> list:
+def _build_cards_claude(prompt: str):
     import anthropic
 
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
@@ -201,9 +219,9 @@ def _build_cards_claude(prompt: str) -> list:
         messages=[{"role": "user", "content": prompt}],
     )
     if response.stop_reason == "refusal":
-        return []
+        return "", []
     text = next((b.text for b in response.content if b.type == "text"), "")
-    return _extract_cards(text)
+    return _extract_summary(text), _extract_cards(text)
 
 
 # ── ③ 휴리스틱 (무료, AI 미사용) — 기사 제목을 줄 단위로 나눔, 후보 1개만 ──
@@ -230,3 +248,12 @@ def _build_cards_heuristic(article: dict) -> list:
         if sep in title:
             title = title.split(sep)[0].strip()
     return [{"headline": _break_lines(title)}]
+
+
+def _heuristic_summary(article: dict) -> str:
+    """AI 없이 요약문 대신 쓸 텍스트 — og:description 또는 본문 앞부분."""
+    desc = (article.get("description") or "").strip()
+    if desc:
+        return desc[:300]
+    joined = " ".join(article.get("paragraphs") or [])[:300].strip()
+    return joined
