@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 import config
 from article import fetch_image_bytes
@@ -82,9 +82,12 @@ def _brand_font(size: int) -> ImageFont.FreeTypeFont:
         return _font(True, size)
 
 
-# 원본이 이보다 작으면 억지로 늘려 쓰지 않고 깔끔한 단색 배경으로 대체
-MIN_SOURCE_WIDTH = 640
-MIN_SOURCE_HEIGHT = 500
+# 이 크기 이상이면 선명하게(블러 없이) 사용
+SHARP_MIN_WIDTH = 640
+SHARP_MIN_HEIGHT = 500
+# 이 크기 미만이면 아이콘/로고급으로 보고 아예 배경으로 쓰지 않음
+HARD_MIN_WIDTH = 220
+HARD_MIN_HEIGHT = 160
 
 
 def _size_suffix_variants(url: str) -> list:
@@ -109,32 +112,43 @@ def _download(url: str, referer: str) -> Image.Image:
         return None
 
 
-def _fetch_one_image(url: str, referer: str) -> Image.Image:
-    """이미지를 받아 화질 기준을 통과하면 1080x1350 cover 크롭, 아니면 None.
-
-    파일명에 크기가 박힌 CDN(예: ..._290.jpg)이면 더 큰 사이즈를 자동으로 시도한다."""
-    img = _download(url, referer)
-    if img is not None and (img.width < MIN_SOURCE_WIDTH or img.height < MIN_SOURCE_HEIGHT):
-        print(f"[card_news] 이미지 해상도가 낮아({img.width}x{img.height}) — 더 큰 사이즈 시도: {url}")
-        for bigger_url in _size_suffix_variants(url):
-            bigger = _download(bigger_url, referer)
-            if bigger is not None and bigger.width >= MIN_SOURCE_WIDTH and bigger.height >= MIN_SOURCE_HEIGHT:
-                img = bigger
-                break
-        else:
-            img = None
-
-    if img is None:
-        return None
-    if img.width < MIN_SOURCE_WIDTH or img.height < MIN_SOURCE_HEIGHT:
-        print(f"[card_news] 이미지 해상도가 낮아({img.width}x{img.height}) 건너뜀: {url}")
-        return None
-
+def _cover_crop(img: Image.Image) -> Image.Image:
     scale = max(W / img.width, H / img.height)
     img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
     left = (img.width - W) // 2
     top = (img.height - H) // 2
-    return img.crop((left, top, left + W, top + H))
+    return img.crop((left, top, left + W, top + H)), scale
+
+
+def _fetch_one_image(url: str, referer: str) -> Image.Image:
+    """이미지를 받아 배경으로 다듬어 반환. 실패/너무 작으면(아이콘급) None.
+
+    - SHARP 기준(가로640·세로500) 이상: 선명하게 그대로 사용
+    - 그보다 작지만 HARD 기준(220x160) 이상: 파일명에 크기가 박힌 CDN이면 더 큰 사이즈를
+      먼저 시도하고, 그래도 작으면 화질 저하를 감추기 위해 의도적으로 블러 처리한
+      '무드 배경'으로 사용 (요즘 카드뉴스에서 흔한 스타일)
+    - HARD 기준 미만(아이콘/로고 크기): 배경으로 쓰지 않음
+    """
+    img = _download(url, referer)
+    if img is None:
+        return None
+
+    if img.width < HARD_MIN_WIDTH or img.height < HARD_MIN_HEIGHT:
+        print(f"[card_news] 이미지가 너무 작아({img.width}x{img.height}) 건너뜀: {url}")
+        return None
+
+    if img.width < SHARP_MIN_WIDTH or img.height < SHARP_MIN_HEIGHT:
+        # 더 큰 버전이 있는지 먼저 시도
+        for bigger_url in _size_suffix_variants(url):
+            bigger = _download(bigger_url, referer)
+            if bigger is not None and bigger.width >= SHARP_MIN_WIDTH and bigger.height >= SHARP_MIN_HEIGHT:
+                img = bigger
+                break
+
+    cropped, scale = _cover_crop(img)
+    if scale > (W / SHARP_MIN_WIDTH):  # 여전히 작은 원본을 크게 늘린 경우 — 무드 배경으로
+        cropped = cropped.filter(ImageFilter.GaussianBlur(14))
+    return cropped
 
 
 def load_backgrounds(article: dict, count: int) -> list:

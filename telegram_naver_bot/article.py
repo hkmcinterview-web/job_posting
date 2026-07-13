@@ -12,8 +12,12 @@ HEADERS = {
     "Accept-Language": "ko,en;q=0.8",
 }
 
-# 네이버/다음 등 주요 언론사 본문 컨테이너
-BODY_SELECTORS = "#dic_area, #newsct_article, #articleBodyContents, #article-view-content-div, article"
+# 네이버/다음 등, 실제로 "기사 본문만" 담고 있다고 확신할 수 있는 컨테이너.
+# 본문 속 사진(image_urls)은 여기서 매칭됐을 때만 긁어온다.
+SPECIFIC_BODY_SELECTORS = "#dic_area, #newsct_article, #articleBodyContents, #article-view-content-div"
+# 위에서 못 찾았을 때 텍스트 추출용으로만 쓰는 넓은 폴백 — <article> 태그는 사이드바의
+# '관련기사' 추천 위젯까지 포함하는 경우가 많아, 사진 후보로는 신뢰하지 않는다.
+GENERIC_BODY_SELECTOR = "article"
 
 # 로고/아이콘/광고로 흔히 쓰이는 파일명 패턴 — 본문 이미지 후보에서 제외
 _JUNK_IMG_RE = re.compile(r"(logo|icon|sprite|banner|ad_|_ad\.|btn_|blank\.gif|pixel\.gif)", re.I)
@@ -64,8 +68,12 @@ def fetch_article(url: str) -> dict:
         if u and u not in seen_img:
             seen_img.add(u)
             image_urls.append(u)
-    body_node = soup.select_one(BODY_SELECTORS)
-    if body_node:
+    body_node = soup.select_one(SPECIFIC_BODY_SELECTORS)
+    is_specific_body = body_node is not None
+    if body_node is None:
+        body_node = soup.select_one(GENERIC_BODY_SELECTOR)  # 텍스트 추출용 (사진 후보로는 안 씀)
+
+    if is_specific_body:
         for img in body_node.find_all("img"):
             src = img.get("src") or img.get("data-src") or ""
             if not src or _JUNK_IMG_RE.search(src):
@@ -79,15 +87,16 @@ def fetch_article(url: str) -> dict:
             if len(image_urls) >= 8:
                 break
 
-    # 출처(언론사명) — 여러 위치를 시도
-    source = _clean_source(
-        og("article:author") or og("author")
-        or (soup.find("meta", attrs={"name": "twitter:creator"}) or {}).get("content", "")
-        or og("site_name")
-    )
-    if not source or source.lower() in ("naver", "daum"):
+    # 출처(언론사명) — 실제 매체명(og:site_name)을 우선하고, 기자명 등은 최후 대체로만 사용
+    source = _clean_source(og("site_name"))
+    if not source or source.lower() in ("naver", "daum", "네이버", "다음"):
+        source = _clean_source(
+            og("article:author") or og("author")
+            or (soup.find("meta", attrs={"name": "twitter:creator"}) or {}).get("content", "")
+        )
+    if not source:
         host = urlparse(url).netloc.replace("www.", "")
-        source = _clean_source(og("site_name")) or host.split(".")[0]
+        source = host.split(".")[0]
 
     # 본문 — 언론사 본문 컨테이너 우선, 없으면 <p> 태그
     paragraphs = []
