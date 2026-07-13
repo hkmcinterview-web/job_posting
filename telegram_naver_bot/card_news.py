@@ -145,9 +145,7 @@ def _fetch_one_image(url: str, referer: str) -> Image.Image:
                 img = bigger
                 break
 
-    cropped, scale = _cover_crop(img)
-    if scale > (W / SHARP_MIN_WIDTH):  # 여전히 작은 원본을 크게 늘린 경우 — 무드 배경으로
-        cropped = cropped.filter(ImageFilter.GaussianBlur(14))
+    cropped, _scale = _cover_crop(img)
     return cropped
 
 
@@ -199,6 +197,32 @@ def _emphasize(line: str, highlight: str) -> bool:
     return highlight in line or line in highlight
 
 
+def _apply_graduated_blur_dark(img: Image.Image, ramp_top: int, ramp_bottom: int) -> Image.Image:
+    """ramp_top 위쪽은 원본 그대로(선명·안 어두움), ramp_top~ramp_bottom 구간에서
+    블러와 어둡기가 함께 강해지고, ramp_bottom 아래는 최대 블러+어둡기를 유지한다."""
+    ramp_top = max(0, min(H, ramp_top))
+    ramp_bottom = max(ramp_top + 1, min(H, ramp_bottom))
+
+    blurred = img.filter(ImageFilter.GaussianBlur(16))
+    blur_mask = Image.new("L", (W, H), 0)
+    dark_mask = Image.new("L", (W, H), 0)
+    DARK_MAX = 210
+    for y in range(H):
+        if y < ramp_top:
+            bv, dv = 0, 0
+        elif y > ramp_bottom:
+            bv, dv = 255, DARK_MAX
+        else:
+            t = (y - ramp_top) / (ramp_bottom - ramp_top)
+            bv, dv = int(255 * t), int(DARK_MAX * t)
+        blur_mask.paste(bv, (0, y, W, y + 1))
+        dark_mask.paste(dv, (0, y, W, y + 1))
+
+    img = Image.composite(blurred, img, blur_mask)
+    img = Image.composite(Image.new("RGB", (W, H), (0, 0, 0)), img, dark_mask)
+    return img
+
+
 def _draw_card(card, background: Image.Image, source: str,
                index: int, total: int) -> Image.Image:
     headline = card.get("headline") or card.get("title", "")
@@ -210,36 +234,35 @@ def _draw_card(card, background: Image.Image, source: str,
     if img.size != (W, H):
         img = img.resize((W, H), Image.LANCZOS)
 
-    # ── 어둡게 + 하단 그라데이션 (텍스트 가독성) ──
-    overlay = Image.new("L", (W, H), 60)  # 전체 약 24% 어둡게
-    grad_top = int(H * 0.45)
-    for y in range(grad_top, H):
-        t = (y - grad_top) / (H - grad_top)
-        overlay.paste(int(60 + t * 150), (0, y, W, y + 1))  # 하단으로 갈수록 최대 ~82%
-    img = Image.composite(Image.new("RGB", (W, H), (0, 0, 0)), img, overlay)
-
-    draw = ImageDraw.Draw(img)
     headline_font = _font(True, 78)
     line_gap = 106
+    footer_cy = H - 74  # 하단 요소들의 세로 중앙 기준선
 
-    # 하단 요소들의 세로 중앙 기준선
-    footer_cy = H - 74
+    # 헤드라인 위치를 먼저 계산 — 배경의 블러/어둡기 시작 지점을 여기 맞추기 위해
+    measure_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    lines = _wrap(measure_draw, headline, headline_font, W - MARGIN * 2)[:4]
+    text_bottom = footer_cy - 140
+    text_top = text_bottom - len(lines) * line_gap
+
+    # ── 상단은 선명하게, 글자 쪽으로 내려올수록 블러+어둡게 ──
+    img = _apply_graduated_blur_dark(img, ramp_top=text_top - 110, ramp_bottom=text_top + 60)
+
+    draw = ImageDraw.Draw(img)
 
     # ── 상단 카테고리 태그(알약) ──
     if tag:
         _draw_tag(draw, MARGIN, 150, tag[:6])
 
-    # ── 헤드라인 (하단 정렬, 살짝 위로 — 단 화면 중앙보다는 아래) ──
-    lines = _wrap(draw, headline, headline_font, W - MARGIN * 2)[:4]
-    text_bottom = footer_cy - 140
-    y = text_bottom - len(lines) * line_gap
+    # ── 헤드라인 ──
+    y = text_top
     for line in lines:
         emph = _emphasize(line, highlight)
         if emph and style == "marker":
-            # 형광펜: 노란 박스 위에 어두운 글씨
-            tw = draw.textlength(line, font=headline_font)
-            draw.rounded_rectangle([MARGIN - 8, y + 14, MARGIN + tw + 18, y + 96],
-                                   radius=10, fill=HILITE)
+            # 형광펜: 실제 글자 잉크 영역(textbbox) 기준으로 위아래 여백을 동일하게
+            bbox = draw.textbbox((MARGIN, y), line, font=headline_font)
+            pad_x, pad_y = 12, 14
+            draw.rectangle([bbox[0] - pad_x, bbox[1] - pad_y, bbox[2] + pad_x, bbox[3] + pad_y],
+                          fill=HILITE)  # 직각 모서리
             draw.text((MARGIN, y), line, font=headline_font, fill=DARK)
         elif emph:
             # 포인트 컬러 글씨 (그림자로 가독성 확보)
@@ -250,16 +273,12 @@ def _draw_card(card, background: Image.Image, source: str,
             draw.text((MARGIN, y), line, font=headline_font, fill=WHITE)
         y += line_gap
 
-    # ── 하단: 출처(좌) · 유튜브로고+브랜드(중앙) · 페이지(우) ──
+    # ── 하단: 출처(좌) · 유튜브로고+브랜드(중앙) ──
     # anchor 로 세로 중앙(middle) 정렬해 로고와 글자 높이를 맞춘다
     src_font = _font(False, 24)
     if source:
         draw.text((MARGIN, footer_cy), f"@{source}"[:20], font=src_font,
                   fill=SUBTEXT, anchor="lm")
-    if total > 1:
-        page = f"{index + 1}/{total}"
-        draw.text((W - MARGIN, footer_cy), page, font=src_font,
-                  fill=SUBTEXT, anchor="rm")
 
     # 유튜브 로고 + 브랜드명 (하단 중앙, 세로 중앙 정렬) — 주아체
     brand = config.BRAND_NAME
