@@ -14,10 +14,12 @@
   │ 카드
   │ https://n.news...   (1~3개)
   │ https://n.news...
-  └ → 각 링크를 카드뉴스로 만들어 텔레그램으로 회신
+  └ → 링크마다 헤드라인 후보를 2~3개 제안 → 숫자로 답장하면 그걸로 카드 1장 생성
+      (AI 가 없어서 후보가 1개뿐이면 고를 필요 없이 바로 생성)
 
 실행: python main.py  (24시간 켜져 있는 서버/PC 에서 실행)
 """
+import re
 import time
 import traceback
 
@@ -27,7 +29,7 @@ from card_news import render_cards
 from editor import build_cafe_post
 from message_parser import detect_mode, extract_links, split_title_body
 from naver_cafe import post_article
-from summarize import build_cards
+from summarize import build_card_options
 from telegram_client import TelegramClient
 
 HELP_TEXT = (
@@ -42,11 +44,20 @@ HELP_TEXT = (
     "  https://n.news...\n\n"
     "🖼 카드뉴스 만들기:\n"
     "  첫 줄에 '카드' 라고 쓰고, 링크 1~3개를 넣으세요.\n"
+    "  링크마다 헤드라인 후보를 보여드리면 숫자로 골라주세요.\n"
     "  예)\n"
     "  카드\n"
     "  https://n.news...\n"
     "  https://n.news..."
 )
+
+# 링크당 카드 선택 후보 개수 (2~3)
+N_OPTIONS = max(2, min(3, config.MAX_CARDS_PER_LINK or 3))
+
+# chat_id 별로 "카드 후보 선택 대기" 상태를 들고 있음 (봇 재시작 시 초기화됨)
+# {chat_id: {"queue": [url, ...], "link_idx": int, "made": int, "stamp": int,
+#            "article": dict|None, "options": list|None}}
+PENDING_CARD: dict = {}
 
 
 # ── 카페 글 게시 ─────────────────────────────────────────
@@ -72,7 +83,70 @@ def handle_cafe(tg: TelegramClient, chat_id: int, content: str):
     tg.send_message(chat_id, f"✅ 카페 게시 완료!\n제목: {subject}\n{url}")
 
 
-# ── 카드뉴스 제작 ────────────────────────────────────────
+# ── 카드뉴스 제작 (헤드라인 후보 선택 방식) ─────────────────
+
+def _format_options(options: list) -> str:
+    lines = ["📝 헤드라인 후보 — 숫자로 답장해서 골라주세요:"]
+    for i, opt in enumerate(options, 1):
+        headline = (opt.get("headline") or "").replace("\n", " / ")
+        tag = f"[{opt['tag']}] " if opt.get("tag") else ""
+        lines.append(f"{i}. {tag}{headline}")
+    return "\n".join(lines)
+
+
+def _finish_link(tg: TelegramClient, chat_id: int, card: dict, art: dict, state: dict):
+    """선택(또는 자동 확정)된 카드 1장을 렌더링해서 보내고 다음 링크로 진행."""
+    try:
+        paths = render_cards([card], art, f"{state['stamp']}_{state['link_idx']}")
+        for p in paths:
+            tg.send_photo(chat_id, p, caption=art.get("title", "")[:80])
+        state["made"] += len(paths)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 카드뉴스 생성 실패: {e}")
+    _advance(tg, chat_id)
+
+
+def _advance(tg: TelegramClient, chat_id: int):
+    """대기열의 다음 링크를 처리 — 후보가 여럿이면 물어보고, 하나뿐이면 바로 생성."""
+    state = PENDING_CARD.get(chat_id)
+    if not state:
+        return
+    state["article"] = None
+    state["options"] = None
+
+    if not state["queue"]:
+        tg.send_message(chat_id, f"✅ 카드뉴스 {state['made']}장 완성!")
+        PENDING_CARD.pop(chat_id, None)
+        return
+
+    url = state["queue"].pop(0)
+    state["link_idx"] += 1
+    try:
+        art = fetch_article(url)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 수집 실패({url}): {e}")
+        _advance(tg, chat_id)
+        return
+
+    try:
+        options, engine, err = build_card_options(art, N_OPTIONS)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 요약 실패: {e}")
+        _advance(tg, chat_id)
+        return
+
+    if len(options) <= 1:
+        # AI 를 못 썼거나 실패 — 고를 필요 없이 바로 그 하나로 카드 생성
+        if engine == "heuristic" and (config.GEMINI_API_KEY or config.ANTHROPIC_API_KEY):
+            tg.send_message(chat_id, f"⚠️ AI 요약 실패로 기본 제목을 사용해요.\n사유: {err}")
+        card = options[0] if options else {"headline": art.get("title", "")[:40]}
+        _finish_link(tg, chat_id, card, art, state)
+        return
+
+    state["article"] = art
+    state["options"] = options
+    tg.send_message(chat_id, f"[링크 {state['link_idx']}] " + _format_options(options))
+
 
 def handle_card(tg: TelegramClient, chat_id: int, content: str):
     links = extract_links(content)[: config.MAX_LINKS]
@@ -80,28 +154,33 @@ def handle_card(tg: TelegramClient, chat_id: int, content: str):
         tg.send_message(chat_id, "⚠️ '카드' 아래에 뉴스 링크(1~3개)를 함께 보내주세요.")
         return
 
-    tg.send_message(chat_id, f"⏳ 카드뉴스 만드는 중 — 링크 {len(links)}개")
-    stamp = int(time.time())
-    made = 0
-    for idx, url in enumerate(links, 1):
-        try:
-            art = fetch_article(url)
-        except Exception as e:
-            tg.send_message(chat_id, f"⚠️ 링크 {idx} 수집 실패({url}): {e}")
-            continue
-        try:
-            cards, engine, err = build_cards(art, config.MAX_CARDS_PER_LINK)
-            if engine == "heuristic" and (config.GEMINI_API_KEY or config.ANTHROPIC_API_KEY):
-                # AI 키를 넣었는데 제목 그대로 나왔다면 이유를 알려줌
-                tg.send_message(chat_id, f"⚠️ AI 요약 실패로 제목을 사용했어요.\n사유: {err}")
-            paths = render_cards(cards, art, f"{stamp}_{idx}")
-            for p in paths:
-                tg.send_photo(chat_id, p, caption=art.get("title", "")[:80])
-            made += len(paths)
-        except Exception as e:
-            tg.send_message(chat_id, f"⚠️ 링크 {idx} 카드뉴스 생성 실패: {e}")
+    PENDING_CARD[chat_id] = {
+        "queue": links,
+        "link_idx": 0,
+        "made": 0,
+        "stamp": int(time.time()),
+        "article": None,
+        "options": None,
+    }
+    tg.send_message(chat_id, f"⏳ 카드뉴스 준비 중 — 링크 {len(links)}개")
+    _advance(tg, chat_id)
 
-    tg.send_message(chat_id, f"✅ 카드뉴스 {made}장 완성!")
+
+def _try_resolve_selection(tg: TelegramClient, chat_id: int, text: str) -> bool:
+    """대기 중인 후보 선택에 대한 답장이면 처리하고 True, 아니면 False."""
+    state = PENDING_CARD.get(chat_id)
+    if not state or not state.get("options"):
+        return False
+
+    m = re.match(r"\s*([1-9])", text.strip())
+    options = state["options"]
+    if not m or int(m.group(1)) > len(options):
+        return False
+
+    chosen = options[int(m.group(1)) - 1]
+    art = state["article"]
+    _finish_link(tg, chat_id, chosen, art, state)
+    return True
 
 
 # ── 메인 루프 ────────────────────────────────────────────
@@ -147,6 +226,13 @@ def main():
                 print(f"[main] 허용되지 않은 chat_id={chat_id} — 무시")
                 continue
             try:
+                # 카드 후보 선택 대기 중이면 숫자 답장인지 먼저 확인
+                if chat_id in PENDING_CARD and _try_resolve_selection(tg, chat_id, text):
+                    continue
+                if chat_id in PENDING_CARD and PENDING_CARD[chat_id].get("options"):
+                    tg.send_message(chat_id, "⚠️ 진행 중이던 선택은 취소하고 새 요청을 처리할게요. "
+                                             "(후보를 고르려면 숫자만 답장해주세요)")
+                    PENDING_CARD.pop(chat_id, None)
                 handle_message(tg, chat_id, text)
             except Exception as e:
                 traceback.print_exc()

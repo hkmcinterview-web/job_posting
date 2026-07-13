@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
-"""기사 내용을 카드뉴스용 헤드라인(1~3장)으로 요약합니다.
+"""기사 내용으로 카드뉴스 1장(사진 배경 + 헤드라인)용 헤드라인 후보를 만듭니다.
 
-스타일: 사진 배경 위에 얹는 짧고 임팩트 있는 문장.
-카드 1장 = {"headline": "줄바꿈(\\n)이 포함된 2~3줄 문장"}
+흐름: 링크 하나당 서로 다른 톤의 헤드라인 후보를 여러 개 생성 → 사용자가 텔레그램에서
+숫자로 하나를 고르면 그것으로 카드 1장을 렌더링합니다.
+
+카드(후보) 1개 = {"headline": "...", "tag": "...", "highlight": "...", "style": "marker"}
 
 요약 엔진 우선순위:
   1) GEMINI_API_KEY 있으면 → 구글 Gemini (무료 등급)
   2) ANTHROPIC_API_KEY 있으면 → Claude (유료)
-  3) 둘 다 없으면 → 기사 제목 기반 휴리스틱 (무료)
+  3) 둘 다 없으면 → 기사 제목 기반 휴리스틱 (무료, 후보 1개만 — 고를 필요 없이 바로 사용)
 """
 import json
 import re
@@ -18,14 +20,15 @@ import config
 
 # ── 공통 프롬프트 ────────────────────────────────────────
 
-def _build_prompt(article: dict, max_cards: int) -> str:
+def _build_prompt(article: dict, n_options: int) -> str:
     body = "\n".join(article.get("paragraphs", []))[:6000]
     return (
-        "다음 뉴스 기사를 SNS 카드뉴스 헤드라인으로 만들어 주세요.\n"
-        "기사 사진 위에 큰 글씨로 얹는 형식이라 문장이 짧고 눈에 확 들어와야 합니다.\n\n"
+        "다음 뉴스 기사로 SNS 카드뉴스를 1장 만들 겁니다.\n"
+        "기사 사진 위에 큰 글씨로 얹는 형식이라 문장이 짧고 눈에 확 들어와야 합니다.\n"
+        f"같은 카드에 쓸 서로 다른 톤/문구의 헤드라인 후보를 정확히 {n_options}개 제안해 주세요.\n"
+        "(순차적인 여러 포인트가 아니라, 같은 기사 내용을 표현하는 서로 다른 버전입니다)\n\n"
         "규칙:\n"
         "- ⚠️ 기사 제목을 그대로 베끼지 말 것! 본문 내용을 파악해서 새로 쓴 센스있는 문장이어야 함\n"
-        f"- 기본은 카드 1장. 기사에 서로 다른 핵심 포인트가 여럿일 때만 최대 {max_cards}장\n"
         "- headline 은 2~3줄, 각 줄 8~14자, 줄바꿈 위치는 의미 단위로 자연스럽게 (\\n 사용)\n"
         "- 첫 줄은 후킹하는 한마디(반응/요점), 이어지는 줄에서 핵심 사실 전달\n"
         "- 커뮤니티 카드뉴스처럼 딱딱하지 않고 위트있게. 예시 톤:\n"
@@ -37,8 +40,9 @@ def _build_prompt(article: dict, max_cards: int) -> str:
         "- tag: 기사 성격을 나타내는 2~4자 카테고리 (예: 이슈, 속보, 경제, 노동, 증시, 취업, 정치, 국제, IT)\n"
         "- highlight: headline 여러 줄 중 가장 강조하고 싶은 '한 줄'을 그대로 복사 (반드시 headline 안의 한 줄과 정확히 일치)\n"
         "- style: 강조 방식. 강렬한 이슈/속보는 \"marker\"(형광펜), 차분한 정보성은 \"color\"(포인트 컬러)\n"
+        f"- {n_options}개 후보는 서로 눈에 띄게 다른 각도/톤이어야 함 (예: 반응 위주 / 숫자 강조 / 임팩트 문구)\n"
         '- 반드시 아래 JSON 형식으로만 답하기 (다른 말 없이):\n'
-        '  {"cards": [{"headline": "...", "tag": "...", "highlight": "...", "style": "marker"}]}\n\n'
+        '  {"cards": [{"headline": "...", "tag": "...", "highlight": "...", "style": "marker"}, ...]}\n\n'
         f"[기사 제목] {article.get('title', '')}\n"
         f"[요약] {article.get('description', '')}\n"
         f"[본문]\n{body}"
@@ -81,7 +85,7 @@ def _repair_unescaped_quotes(text: str) -> str:
 
 
 def _extract_cards(text: str) -> list:
-    """모델 응답 텍스트에서 JSON 을 뽑아 카드 목록을 반환."""
+    """모델 응답 텍스트에서 JSON 을 뽑아 헤드라인 후보 목록을 반환."""
     text = (text or "").strip()
     # ```json ... ``` 코드블록 안에 넣는 모델 대비
     m = re.search(r"\{.*\}", text, re.DOTALL)
@@ -96,34 +100,37 @@ def _extract_cards(text: str) -> list:
     return [c for c in data.get("cards", []) if c.get("headline", "").strip()]
 
 
-def build_cards(article: dict, max_cards: int = 3):
-    """returns (cards, engine, error)
-    engine ∈ {'gemini','claude','heuristic'}, error 는 AI 실패 사유(없으면 "")."""
-    max_cards = max(1, min(3, max_cards))
-    prompt = _build_prompt(article, max_cards)
+def build_card_options(article: dict, n_options: int = 3):
+    """카드 1장에 쓸 헤드라인 후보를 n_options개 만든다.
+
+    returns (options, engine, error)
+    engine ∈ {'gemini','claude','heuristic'}, error 는 AI 실패 사유(없으면 "").
+    AI 를 못 쓰면 후보 1개(제목 기반)만 돌려준다 — 이 경우 호출 측에서 선택 없이 바로 사용하면 된다."""
+    n_options = max(2, min(3, n_options))
+    prompt = _build_prompt(article, n_options)
     error = ""
 
     if config.GEMINI_API_KEY:
         try:
-            cards = _build_cards_gemini(prompt)
-            if cards:
-                return cards[:max_cards], "gemini", ""
-            error = "Gemini 응답에 카드가 없음"
+            options = _build_cards_gemini(prompt)
+            if options:
+                return options[:n_options], "gemini", ""
+            error = "Gemini 응답에 후보가 없음"
         except Exception as e:
             error = f"Gemini: {e}"
             print(f"[summarize] Gemini 요약 실패, 다음 방식으로 대체: {e}")
 
     if config.ANTHROPIC_API_KEY:
         try:
-            cards = _build_cards_claude(prompt)
-            if cards:
-                return cards[:max_cards], "claude", ""
-            error = error or "Claude 응답에 카드가 없음"
+            options = _build_cards_claude(prompt)
+            if options:
+                return options[:n_options], "claude", ""
+            error = error or "Claude 응답에 후보가 없음"
         except Exception as e:
             error = f"Claude: {e}"
             print(f"[summarize] Claude 요약 실패, 휴리스틱으로 대체: {e}")
 
-    return _build_cards_heuristic(article, max_cards), "heuristic", error
+    return _build_cards_heuristic(article), "heuristic", error
 
 
 # ── ① 구글 Gemini (무료 등급) ────────────────────────────
@@ -203,7 +210,7 @@ def _build_cards_claude(prompt: str) -> list:
     return _extract_cards(text)
 
 
-# ── ③ 휴리스틱 (무료, AI 미사용) — 기사 제목을 줄 단위로 나눔 ──
+# ── ③ 휴리스틱 (무료, AI 미사용) — 기사 제목을 줄 단위로 나눔, 후보 1개만 ──
 
 def _break_lines(text: str, per_line: int = 13, max_lines: int = 3) -> str:
     words = (text or "").split()
@@ -221,7 +228,7 @@ def _break_lines(text: str, per_line: int = 13, max_lines: int = 3) -> str:
     return "\n".join(lines) if lines else (text or "")[: per_line * max_lines]
 
 
-def _build_cards_heuristic(article: dict, max_cards: int) -> list:
+def _build_cards_heuristic(article: dict) -> list:
     title = article.get("title", "") or "뉴스 요약"
     for sep in (" - ", " | ", " :: "):
         if sep in title:
