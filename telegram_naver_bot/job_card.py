@@ -97,9 +97,9 @@ def _make_aurora_bg(accent) -> Image.Image:
     모서리에 크게 깔고 강하게 블러 처리해 부드럽게 번지는 느낌을 만든다."""
     bg = Image.new("RGB", (W, H), (250, 251, 253))
     d = ImageDraw.Draw(bg)
-    strong = _tint(accent, 0.50)   # 진한 파스텔
-    soft = _tint(accent, 0.72)     # 연한 파스텔
-    faint = _tint(accent, 0.84)
+    strong = _tint(accent, 0.74)   # 연한 파스텔 (은은하게)
+    soft = _tint(accent, 0.85)
+    faint = _tint(accent, 0.92)
     d.ellipse([W - 560, -320, W + 300, 440], fill=strong)      # 우상단 큰 블롭
     d.ellipse([-380, -240, 260, 320], fill=faint)              # 좌상단 은은하게
     d.ellipse([-320, H - 460, 340, H + 280], fill=soft)        # 좌하단
