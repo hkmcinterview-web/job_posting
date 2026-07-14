@@ -67,7 +67,22 @@ def _encode_field(text: str) -> str:
     return quote(_to_html_entities(text).encode("utf-8"), safe="")
 
 
-def post_article(subject: str, content_html: str, image_paths=None) -> dict:
+# 연속 등록 제한(도배 방지) — 짧은 간격으로 연달아 올리면 HTTP 403/999 로
+# 거부되는 것을 실측으로 확인함. 마지막 게시 후 최소 이 시간(초)을 확보한다.
+_MIN_POST_INTERVAL = 65
+_last_post_at = 0.0
+
+
+def _respect_rate_limit():
+    global _last_post_at
+    wait = _MIN_POST_INTERVAL - (time.time() - _last_post_at)
+    if wait > 0:
+        print(f"[naver_cafe] 연속 등록 제한 회피 — {wait:.0f}초 대기...")
+        time.sleep(wait)
+
+
+def post_article(subject: str, content_html: str, image_paths=None,
+                 menu_id: str = "") -> dict:
     """카페에 글을 작성하고 {'articleId': ..., 'articleUrl': ...} 를 반환합니다.
 
     subject/content 는 한글을 HTML 엔티티로 바꾼 뒤(_to_html_entities 참고)
@@ -80,11 +95,14 @@ def post_article(subject: str, content_html: str, image_paths=None) -> dict:
     글 자체가 등록되지 않습니다. 그래서 문자열을 직접 조립해 raw bytes 로 보냅니다.
     이미지가 있으면(multipart) 이 문제가 없어 원본 텍스트를 그대로 보냅니다.
     """
+    global _last_post_at
     token = _get_access_token()
+    menu = menu_id or config.NAVER_CAFE_MENU_ID
     url = (f"https://openapi.naver.com/v1/cafe/{config.NAVER_CAFE_CLUB_ID}"
-           f"/menu/{config.NAVER_CAFE_MENU_ID}/articles")
+           f"/menu/{menu}/articles")
     print(f"[naver_cafe] 요청 URL: {url}  (clubid={config.NAVER_CAFE_CLUB_ID}, "
-          f"menuid={config.NAVER_CAFE_MENU_ID})")
+          f"menuid={menu})")
+    _respect_rate_limit()
 
     def _send(access_token):
         headers = {"Authorization": f"Bearer {access_token}"}
@@ -117,6 +135,7 @@ def post_article(subject: str, content_html: str, image_paths=None) -> dict:
         tokens = refresh_access_token(load_tokens())
         resp = _send(tokens["access_token"])
 
+    _last_post_at = time.time()  # 실패한 시도도 도배 방지 카운트에 걸릴 수 있어 항상 기록
     if resp.status_code != 200:
         raise RuntimeError(f"카페 글쓰기 실패 (HTTP {resp.status_code}): {resp.text[:500]}")
 

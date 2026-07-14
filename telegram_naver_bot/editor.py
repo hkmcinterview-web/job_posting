@@ -30,6 +30,16 @@ def _linkify(line: str) -> str:
     return "".join(out)
 
 
+def _body_html(body: str) -> list:
+    parts = []
+    for line in (body or "").replace("\r", "").split("\n"):
+        if line.strip():
+            parts.append(f"<p>{_linkify(line)}</p>")
+        else:
+            parts.append("<br>")
+    return parts
+
+
 def build_cafe_post(title: str, body: str) -> tuple:
     """returns (subject, content_html)"""
     today = dt.date.today().strftime("%Y.%m.%d")
@@ -38,13 +48,33 @@ def build_cafe_post(title: str, body: str) -> tuple:
     parts = []
     if config.POST_HEADER:
         parts.append(config.POST_HEADER)
+    parts.extend(_body_html(body))
+    if config.POST_FOOTER:
+        parts.append(config.POST_FOOTER)
 
-    for line in (body or "").replace("\r", "").split("\n"):
-        if line.strip():
-            parts.append(f"<p>{_linkify(line)}</p>")
-        else:
-            parts.append("<br>")
+    return subject, "\n".join(parts)
 
+
+def build_job_post(job: dict, summary: str, url: str) -> tuple:
+    """채용공고 카페 글. returns (subject, content_html)"""
+    company = (job.get("company") or "").strip()
+    title_one = " ".join(t.strip() for t in (job.get("title") or "").split("/") if t.strip())
+    deadline = (job.get("deadline") or "").strip()
+
+    subject = f"[채용] {title_one}" if title_one else f"[채용] {company} 채용공고"
+    if company and company not in subject:
+        subject = f"[채용] {company} — {title_one}"
+    if deadline:
+        subject += f" (~{deadline})"
+
+    body = summary.strip()
+    if url:
+        body += f"\n\n▶ 공고 원문 / 지원하기\n{url}"
+
+    parts = []
+    if config.POST_HEADER:
+        parts.append(config.POST_HEADER)
+    parts.extend(_body_html(body))
     if config.POST_FOOTER:
         parts.append(config.POST_FOOTER)
 

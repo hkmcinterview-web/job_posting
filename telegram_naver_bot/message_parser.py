@@ -12,10 +12,11 @@ TRAILING_PUNCT = ").,>]\"'”’"
 
 CAFE_WORDS = ("카페", "cafe", "글")
 CARD_WORDS = ("카드", "card", "카드뉴스")
+JOB_WORDS = ("채용", "채용공고", "job")
 
 
 def detect_mode(text: str):
-    """returns (mode, rest_text). mode ∈ {'cafe','card',None}"""
+    """returns (mode, rest_text). mode ∈ {'cafe','card','job',None}"""
     stripped = (text or "").lstrip()
     # 첫 토큰(공백/줄바꿈/콜론 전까지)
     head = re.split(r"[\s:：]", stripped, 1)[0].lower()
@@ -24,6 +25,8 @@ def detect_mode(text: str):
         return "cafe", rest
     if head in CARD_WORDS:
         return "card", rest
+    if head in JOB_WORDS:
+        return "job", rest
     return None, text
 
 

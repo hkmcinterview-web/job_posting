@@ -127,6 +127,45 @@ def fetch_article(url: str) -> dict:
     }
 
 
+def fetch_job_page(url: str) -> dict:
+    """채용공고 페이지에서 눈에 보이는 텍스트를 폭넓게 수집합니다.
+
+    채용 사이트는 뉴스처럼 정형화된 본문 컨테이너가 없어서,
+    script/style 등을 제거한 뒤 페이지 전체 텍스트를 가져와 AI 에 넘깁니다."""
+    resp = requests.get(url, headers=HEADERS, timeout=20, allow_redirects=True)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    def og(prop):
+        tag = (soup.find("meta", property=f"og:{prop}")
+               or soup.find("meta", attrs={"name": prop}))
+        return (tag.get("content") or "").strip() if tag and tag.get("content") else ""
+
+    title = og("title")
+    if not title and soup.title:
+        title = soup.title.get_text(strip=True)
+
+    for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
+        tag.decompose()
+
+    lines, prev = [], None
+    for raw in (soup.body or soup).get_text("\n").split("\n"):
+        line = " ".join(raw.split())
+        if len(line) < 2 or line == prev:
+            continue
+        prev = line
+        lines.append(line)
+    text = "\n".join(lines)[:9000]
+
+    return {
+        "url": url,
+        "title": title,
+        "description": og("description"),
+        "site": og("site_name") or urlparse(url).netloc,
+        "text": text,
+    }
+
+
 def fetch_image_bytes(image_url: str, referer: str = "") -> bytes:
     """기사 대표사진 다운로드 (일부 언론사는 Referer 를 요구)."""
     headers = dict(HEADERS)

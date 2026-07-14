@@ -33,6 +33,8 @@ NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
 NAVER_REDIRECT_URI = os.getenv("NAVER_REDIRECT_URI", "https://localhost/callback")
 NAVER_CAFE_CLUB_ID = os.getenv("NAVER_CAFE_CLUB_ID", "")   # 카페 숫자 ID (clubid)
 NAVER_CAFE_MENU_ID = os.getenv("NAVER_CAFE_MENU_ID", "")   # 게시판 숫자 ID (menuid)
+# 채용공고 전용 게시판 menuid — 비우면 기본 게시판(NAVER_CAFE_MENU_ID)에 올라감
+NAVER_CAFE_JOB_MENU_ID = os.getenv("NAVER_CAFE_JOB_MENU_ID", "")
 NAVER_TOKEN_FILE = BASE_DIR / "naver_tokens.json"
 
 # ── AI 요약 (선택 — 없으면 og 메타데이터 기반 요약으로 대체) ──

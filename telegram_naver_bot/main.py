@@ -25,9 +25,11 @@ import time
 import traceback
 
 import config
-from article import fetch_article
+from article import fetch_article, fetch_job_page
 from card_news import render_cards
-from editor import build_cafe_post
+from editor import build_cafe_post, build_job_post
+from job_card import render_job_card
+from job_summary import build_job_data
 from message_parser import detect_mode, extract_links, split_title_body
 from naver_cafe import post_article
 from summarize import build_card_options
@@ -49,7 +51,13 @@ HELP_TEXT = (
     "  예)\n"
     "  카드\n"
     "  https://n.news...\n"
-    "  https://n.news..."
+    "  https://n.news...\n\n"
+    "💼 채용공고 카드 + 카페 게시:\n"
+    "  첫 줄에 '채용' 이라고 쓰고, 채용공고 링크를 넣으세요.\n"
+    "  (링크가 안 읽히는 사이트면 공고 내용을 통째로 복사해 붙여도 됩니다)\n"
+    "  예)\n"
+    "  채용\n"
+    "  https://recruit..."
 )
 
 # 링크당 카드 선택 후보 개수 (2~3)
@@ -82,6 +90,82 @@ def handle_cafe(tg: TelegramClient, chat_id: int, content: str):
     result = post_article(subject, content_html, image_paths=None)
     url = result.get("articleUrl") or "(URL 확인 불가)"
     tg.send_message(chat_id, f"✅ 카페 게시 완료!\n제목: {subject}\n{url}")
+
+
+# ── 채용공고 카드 + 카페 게시 ─────────────────────────────
+
+def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int):
+    job, summary, engine, err = build_job_data(page)
+    if job is None:
+        tg.send_message(chat_id, f"⚠️ 채용공고 {idx} 분석 실패: {err}")
+        return
+
+    # 1) 카드 렌더링 → 텔레그램 전송
+    path = render_job_card(job, f"job_{int(time.time())}_{idx}")
+    caption = " ".join(t.strip() for t in (job.get("title") or "").split("/"))
+    tg.send_photo(chat_id, path, caption=caption[:80])
+
+    # 2) 정리 텍스트 (SNS 캡션/검수용)
+    if summary:
+        text = f"📝 채용 요약\n{summary}"
+        if page.get("url"):
+            text += f"\n\n공고 링크: {page['url']}"
+        tg.send_message(chat_id, text)
+
+    # 3) 카페 게시 (채용 게시판)
+    if not config.naver_configured():
+        tg.send_message(chat_id, "ℹ️ 네이버 API 설정이 없어 카페 게시는 건너뜁니다.")
+        return
+    if not config.NAVER_CAFE_JOB_MENU_ID:
+        tg.send_message(chat_id,
+                        "ℹ️ 채용 게시판(NAVER_CAFE_JOB_MENU_ID)이 .env 에 없어 "
+                        "카페 게시를 건너뜁니다. 게시판 menuid 를 설정해주세요.")
+        return
+
+    tg.send_message(chat_id, "⏳ 카페(채용 게시판)에 올리는 중...")
+    subject, content_html = build_job_post(job, summary, page.get("url", ""))
+    try:
+        # 카드 이미지를 첨부해서 게시 시도 → 실패하면 텍스트만으로 재시도
+        try:
+            result = post_article(subject, content_html, image_paths=[path],
+                                  menu_id=config.NAVER_CAFE_JOB_MENU_ID)
+        except Exception as e:
+            print(f"[main] 이미지 첨부 게시 실패, 텍스트만 재시도: {e}")
+            result = post_article(subject, content_html, image_paths=None,
+                                  menu_id=config.NAVER_CAFE_JOB_MENU_ID)
+        url = result.get("articleUrl") or "(URL 확인 불가)"
+        tg.send_message(chat_id, f"✅ 카페 게시 완료!\n제목: {subject}\n{url}")
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 카페 게시 실패: {e}")
+
+
+def handle_job(tg: TelegramClient, chat_id: int, content: str):
+    links = extract_links(content)[: config.MAX_LINKS]
+
+    if links:
+        for i, url in enumerate(links, 1):
+            tg.send_message(chat_id, f"⏳ 채용공고 {i}/{len(links)} 분석 중...")
+            try:
+                page = fetch_job_page(url)
+                if len(page.get("text") or "") < 150:
+                    tg.send_message(chat_id,
+                                    f"⚠️ 링크 {i} 페이지에서 내용을 거의 못 읽었어요 "
+                                    "(스크립트로만 그려지는 사이트일 수 있음).\n"
+                                    "공고 내용을 복사해서 '채용' 뒤에 붙여 보내면 처리됩니다.")
+                    continue
+                _handle_one_job(tg, chat_id, page, i)
+            except Exception as e:
+                tg.send_message(chat_id, f"⚠️ 채용공고 {i} 처리 실패: {e}")
+        return
+
+    # 링크 없이 공고 본문을 직접 붙여넣은 경우
+    if len(content.strip()) >= 80:
+        tg.send_message(chat_id, "⏳ 붙여넣은 채용공고 내용 분석 중...")
+        page = {"url": "", "title": "", "description": "", "text": content.strip()[:9000]}
+        _handle_one_job(tg, chat_id, page, 1)
+        return
+
+    tg.send_message(chat_id, "⚠️ '채용' 아래에 채용공고 링크(또는 공고 내용 전체)를 함께 보내주세요.")
 
 
 # ── 카드뉴스 제작 (헤드라인 후보 선택 방식) ─────────────────
@@ -212,6 +296,8 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_cafe(tg, chat_id, content)
     elif mode == "card":
         handle_card(tg, chat_id, content)
+    elif mode == "job":
+        handle_job(tg, chat_id, content)
     else:
         tg.send_message(chat_id, HELP_TEXT)
 

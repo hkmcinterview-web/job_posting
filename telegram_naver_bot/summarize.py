@@ -170,10 +170,11 @@ def build_card_options(article: dict, n_options: int = 3):
 
 # ── ① 구글 Gemini (무료 등급) ────────────────────────────
 
-def _build_cards_gemini(prompt: str):
+def _gemini_generate(prompt: str, temperature: float = 0.9) -> str:
+    """Gemini 에 프롬프트를 보내 원문 텍스트를 받는다 (모델 자동 대체 포함)."""
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.9},
+        "generationConfig": {"temperature": temperature},
     }
     # 설정 모델을 먼저 시도하고, 실패(모델 없음/그 모델만 quota 0 등)하면 대체 모델들을 순서대로 시도
     models, seen = [], set()
@@ -204,15 +205,19 @@ def _build_cards_gemini(prompt: str):
         if not candidates:
             raise RuntimeError(f"응답 비어있음(안전필터 가능): {str(data)[:200]}")
         parts = candidates[0].get("content", {}).get("parts", [])
-        text = "".join(p.get("text", "") for p in parts)
-        return _extract_summary(text), _extract_cards(text)
+        return "".join(p.get("text", "") for p in parts)
 
     raise RuntimeError(last_err or "사용 가능한 Gemini 모델 없음")
 
 
+def _build_cards_gemini(prompt: str):
+    text = _gemini_generate(prompt)
+    return _extract_summary(text), _extract_cards(text)
+
+
 # ── ② Claude API (유료) ──────────────────────────────────
 
-def _build_cards_claude(prompt: str):
+def _claude_generate(prompt: str) -> str:
     import anthropic
 
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
@@ -222,9 +227,33 @@ def _build_cards_claude(prompt: str):
         messages=[{"role": "user", "content": prompt}],
     )
     if response.stop_reason == "refusal":
-        return "", []
-    text = next((b.text for b in response.content if b.type == "text"), "")
+        return ""
+    return next((b.text for b in response.content if b.type == "text"), "")
+
+
+def _build_cards_claude(prompt: str):
+    text = _claude_generate(prompt)
     return _extract_summary(text), _extract_cards(text)
+
+
+# ── 공용: 다른 기능(채용공고 등)에서도 같은 AI 폴백 체인을 쓰도록 공개 ──
+
+def generate_text(prompt: str, temperature: float = 0.4):
+    """프롬프트를 AI 에 보내 원문 텍스트를 받는다. returns (text, engine, error)."""
+    error = ""
+    if config.GEMINI_API_KEY:
+        try:
+            return _gemini_generate(prompt, temperature=temperature), "gemini", ""
+        except Exception as e:
+            error = f"Gemini: {e}"
+            print(f"[summarize] Gemini 호출 실패: {e}")
+    if config.ANTHROPIC_API_KEY:
+        try:
+            return _claude_generate(prompt), "claude", ""
+        except Exception as e:
+            error = f"Claude: {e}"
+            print(f"[summarize] Claude 호출 실패: {e}")
+    return "", "none", error or "AI 키(GEMINI_API_KEY 등)가 설정되지 않음"
 
 
 # ── ③ 휴리스틱 (무료, AI 미사용) — 기사 제목을 줄 단위로 나눔, 후보 1개만 ──
