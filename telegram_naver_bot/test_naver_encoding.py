@@ -1,12 +1,21 @@
 # -*- coding: utf-8 -*-
 """네이버 카페 글쓰기 인코딩 진단 도구.
 
-짧은 테스트 글 4개를 서로 다른 인코딩 방식으로 올려봅니다.
-실행 후 카페에 가서 4개 글 중 한글이 정상으로 보이는 게 있는지 확인하고,
-그 글의 라벨(A/B/C/D)을 알려주세요 — 그걸로 정확한 인코딩 방식을 확정합니다.
+⚠️ 중요 발견: 여러 변형을 연달아 올리면 첫 글만 성공하고 나머지가 전부
+HTTP 403/999 로 실패하는 패턴이 확인됨 — 인코딩 문제가 아니라 '연속 등록
+제한(도배 방지)'에 걸렸을 가능성이 높습니다. 그래서 이제 변형을 '하나씩'
+따로 실행할 수 있습니다.
 
-사용법: python test_naver_encoding.py
+사용법:
+  python test_naver_encoding.py B     ← B 변형 하나만 게시 (권장)
+  python test_naver_encoding.py G     ← G 변형 하나만 게시
+  python test_naver_encoding.py       ← 전체 실행 (각 글 사이 60초 대기)
+
+각 변형 사이에 1~2분 정도 간격을 두고 하나씩 실행한 뒤,
+카페에서 한글이 정상으로 보이는 라벨을 알려주세요.
 """
+import sys
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import quote, urlencode
@@ -154,24 +163,36 @@ def _do(send_fn) -> str:
     return f"✅ {result.get('articleUrl') or result.get('cafeUrl') or '(URL 확인 불가)'}"
 
 
+RUNNERS = {
+    "A": lambda: _post_urlencoded("A-UTF8-1회", enc_utf8_single),
+    "B": lambda: _post_urlencoded("B-CP949-1회", enc_cp949_single),
+    "C": lambda: _post_urlencoded("C-UTF8-2회", enc_utf8_double),
+    "D": lambda: _post_urlencoded("D-CP949-2회", enc_cp949_double),
+    "E": lambda: _post_multipart("E-멀티파트"),
+    "F": lambda: _post_urllib("F-urllib"),
+    "G": lambda: _post_entities("G-entity"),
+}
+
+
 def main():
     print(f"테스트 문자열: {TEST_KOREAN}\n")
-    for label, fn in VARIANTS.items():
+
+    picked = [a.strip().upper() for a in sys.argv[1:]]
+    bad = [p for p in picked if p not in RUNNERS]
+    if bad:
+        print(f"알 수 없는 라벨: {', '.join(bad)} (가능: {', '.join(RUNNERS)})")
+        return
+    labels = picked or list(RUNNERS)
+
+    for i, label in enumerate(labels):
+        if i > 0:
+            print("  (연속 등록 제한 회피를 위해 60초 대기...)")
+            time.sleep(60)
         print(f"[{label}] 게시 중...")
-        print("  →", _post_urlencoded(label, fn))
+        print("  →", RUNNERS[label]())
 
-    print("[E-멀티파트] 게시 중...")
-    print("  →", _post_multipart("E-멀티파트"))
-
-    print("[F-urllib] 게시 중...")
-    print("  →", _post_urllib("F-urllib"))
-
-    print("[G-entity] 게시 중...")
-    print("  →", _post_entities("G-entity"))
-
-    print("\n위 글들을 카페에서 열어보고, 한글이 정상으로 보이는 게 있으면")
-    print("그 라벨(A~G)을 알려주세요. 특히 G는 제목/본문을 나눠서 알려주세요")
-    print("(예: 'G 본문은 정상, 제목은 &#...; 글자가 그대로 보임').")
+    print("\n카페에서 방금 올라간 글을 열어보고, 한글이 정상으로 보이는지 알려주세요.")
+    print("G는 제목/본문을 나눠서 알려주세요 (예: 'G 본문은 정상, 제목은 &#...; 그대로').")
 
 
 if __name__ == "__main__":
