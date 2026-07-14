@@ -113,7 +113,9 @@ def post_article(subject: str, content_html: str, image_paths=None,
                 for p in image_paths:
                     f = open(p, "rb")
                     opened_files.append(f)
-                    files.append(("image", (p.name, f, "image/png")))
+                    mime = ("image/jpeg" if str(p).lower().endswith((".jpg", ".jpeg"))
+                            else "image/png")
+                    files.append(("image", (p.name, f, mime)))
                 # 멀티파트도 한글 깨짐 방지를 위해 HTML 엔티티로 변환해서 보냄
                 req_data = {"subject": _to_html_entities(subject),
                             "content": _to_html_entities(content_html)}

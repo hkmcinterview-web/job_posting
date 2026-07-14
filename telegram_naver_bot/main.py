@@ -114,7 +114,9 @@ def _fetch_logo(page: dict):
     return None
 
 
-def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int, images=None):
+def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int,
+                    images=None, photo_paths=None):
+    """photo_paths: 사용자가 보낸 공고 캡처 원본 파일 — 카페 글에 함께 첨부"""
     job, summary, engine, err = build_job_data(page, images=images)
     if job is None:
         tg.send_message(chat_id, f"⚠️ 채용공고 {idx} 분석 실패: {err}")
@@ -144,10 +146,12 @@ def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int, imag
 
     tg.send_message(chat_id, "⏳ 카페(채용 게시판)에 올리는 중...")
     subject, content_html = build_job_post(job, summary, page.get("url", ""))
+    # 첨부 이미지: 만든 카드 + 사용자가 보낸 공고 캡처 원본들
+    cafe_images = [path] + list(photo_paths or [])
     try:
-        # 카드 이미지를 첨부해서 게시 시도 → 실패하면 텍스트만으로 재시도
+        # 이미지를 첨부해서 게시 시도 → 실패하면 텍스트만으로 재시도
         try:
-            result = post_article(subject, content_html, image_paths=[path],
+            result = post_article(subject, content_html, image_paths=cafe_images,
                                   menu_id=config.NAVER_CAFE_JOB_MENU_ID)
         except Exception as e:
             print(f"[main] 이미지 첨부 게시 실패, 텍스트만 재시도: {e}")
@@ -195,11 +199,16 @@ def handle_job_photos(tg: TelegramClient, chat_id: int, caption_rest: str, file_
     import base64
 
     tg.send_message(chat_id, f"⏳ 공고 사진 {len(file_ids)}장 분석 중...")
-    images = []
-    for fid in file_ids[:5]:
+    config.CARDS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = int(time.time())
+    images, photo_paths = [], []
+    for n, fid in enumerate(file_ids[:5], 1):
         try:
             raw = tg.download_file(fid)
             images.append(("image/jpeg", base64.b64encode(raw).decode()))
+            p = config.CARDS_DIR / f"job_src_{stamp}_{n}.jpg"   # 카페 첨부용 원본 보관
+            p.write_bytes(raw)
+            photo_paths.append(p)
         except Exception as e:
             print(f"[main] 사진 다운로드 실패: {e}")
     if not images:
@@ -208,7 +217,7 @@ def handle_job_photos(tg: TelegramClient, chat_id: int, caption_rest: str, file_
 
     page = {"url": "", "title": "", "description": "",
             "text": caption_rest.strip() or "(첨부 이미지 참조)"}
-    _handle_one_job(tg, chat_id, page, 1, images=images)
+    _handle_one_job(tg, chat_id, page, 1, images=images, photo_paths=photo_paths)
 
 
 # ── 카드뉴스 제작 (헤드라인 후보 선택 방식) ─────────────────
