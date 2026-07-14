@@ -172,10 +172,19 @@ def handle_job(tg: TelegramClient, chat_id: int, content: str):
             try:
                 page = fetch_job_page(url)
                 if len(page.get("text") or "") < 150:
+                    try:
+                        import playwright  # noqa: F401 — 설치 여부만 확인
+                        hint = ("브라우저 렌더링으로도 내용을 못 읽는 사이트예요.\n"
+                                "공고 화면을 캡처해서 '채용' 캡션과 함께 사진으로 보내주세요.")
+                    except ImportError:
+                        hint = ("이런 사이트를 자동으로 읽으려면 명령창(cmd)에서 아래 두 줄을\n"
+                                "한 번만 실행하고 봇을 재시작해주세요:\n"
+                                "  pip install playwright\n"
+                                "  playwright install chromium\n"
+                                "또는 공고 화면을 캡처해서 '채용' 캡션과 함께 사진으로 보내도 됩니다.")
                     tg.send_message(chat_id,
                                     f"⚠️ 링크 {i} 페이지에서 내용을 거의 못 읽었어요 "
-                                    "(스크립트로만 그려지는 사이트일 수 있음).\n"
-                                    "공고 내용을 복사해서 '채용' 뒤에 붙여 보내면 처리됩니다.")
+                                    f"(스크립트로만 그려지는 사이트).\n{hint}")
                     continue
                 _handle_one_job(tg, chat_id, page, i)
             except Exception as e:

@@ -127,6 +127,41 @@ def fetch_article(url: str) -> dict:
     }
 
 
+def _rendered_page_text(url: str):
+    """자바스크립트로만 그려지는 페이지 폴백 — 진짜 브라우저(Playwright)로 열어서
+    렌더링이 끝난 뒤의 텍스트를 수집한다. playwright 미설치면 빈 값 반환.
+
+    설치(한 번만):  pip install playwright  →  playwright install chromium"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[article] playwright 미설치 — 브라우저 렌더링 폴백 생략")
+        return "", ""
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_page(user_agent=HEADERS["User-Agent"])
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(4000)   # 스크립트가 내용을 그릴 시간
+                title = page.title() or ""
+                text = page.evaluate("() => document.body ? document.body.innerText : ''")
+            finally:
+                browser.close()
+    except Exception as e:
+        print(f"[article] 브라우저 렌더링 실패({url}): {e}")
+        return "", ""
+
+    lines, prev = [], None
+    for raw in (text or "").split("\n"):
+        line = " ".join(raw.split())
+        if len(line) < 2 or line == prev:
+            continue
+        prev = line
+        lines.append(line)
+    return title, "\n".join(lines)[:9000]
+
+
 def fetch_job_page(url: str) -> dict:
     """채용공고 페이지에서 눈에 보이는 텍스트를 폭넓게 수집합니다.
 
@@ -167,6 +202,14 @@ def fetch_job_page(url: str) -> dict:
         prev = line
         lines.append(line)
     text = "\n".join(lines)[:9000]
+
+    # 내용이 거의 없으면 자바스크립트 렌더링 페이지로 보고 실제 브라우저로 재시도
+    if len(text) < 300:
+        r_title, r_text = _rendered_page_text(url)
+        if len(r_text) > len(text):
+            print(f"[article] 브라우저 렌더링으로 {len(r_text)}자 수집 (일반 방식: {len(text)}자)")
+            text = r_text
+            title = title or r_title
 
     return {
         "url": url,
