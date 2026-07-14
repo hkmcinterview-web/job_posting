@@ -20,7 +20,7 @@ _JOB_BLOCK_RE = re.compile(r"<{2,3}\s*JOB\s*>{2,3}(.*?)<{2,3}\s*END\s*>{2,3}",
                            re.DOTALL | re.IGNORECASE)
 _SUMMARY_BLOCK_RE = re.compile(r"<{2,3}\s*SUMMARY\s*>{2,3}(.*?)<{2,3}\s*END\s*>{2,3}",
                                re.DOTALL | re.IGNORECASE)
-_FIELD_RE = re.compile(r"^\s*(COMPANY|TITLE|DEADLINE|BADGE|TABLE_HEAD|TABLE_ROW|POINT|INFO)"
+_FIELD_RE = re.compile(r"^\s*(COMPANY|TITLE|DEADLINE|BADGE|TABLE_HEAD|TABLE_ROW|POINT|INFO|COLOR)"
                        r"\s*:\s*(.*)$", re.IGNORECASE)
 
 
@@ -39,6 +39,7 @@ def _build_prompt(page: dict) -> str:
         "POINT: 핵심 정보 한 줄씩 3~5개 (지원자격/전형절차/우대사항/근무조건/일정 등, 각 12~26자)\n"
         "       가장 중요한 부분은 {{이렇게}} 감싸서 강조 (전체에서 1~2곳만)\n"
         "INFO: 우하단 요약표 '항목|값' 형태 2~4개 (항목 2~5자, 값 2~8자. 예: 고용형태|정규직)\n"
+        "COLOR: 이 회사의 공식 브랜드 대표색 1개를 #RRGGBB hex 로 (확실히 알 때만. 모르면 이 줄 생략)\n"
         "<<<END>>>\n\n"
         "<<<SUMMARY>>>\n"
         "(카페 게시글 본문 — 이모지/해시태그 없이 아래 구성으로)\n"
@@ -61,7 +62,8 @@ def _parse_job(text: str) -> dict:
     if not m:
         return {}
     job = {"company": "", "title": "", "deadline": "", "badges": [],
-           "table_head": [], "table_rows": [], "points": [], "infos": []}
+           "table_head": [], "table_rows": [], "points": [], "infos": [],
+           "brand_color": ""}
     for line in m.group(1).split("\n"):
         fm = _FIELD_RE.match(line)
         if not fm:
@@ -83,6 +85,8 @@ def _parse_job(text: str) -> dict:
             job["table_rows"].append([c.strip() for c in value.split("|")])
         elif key == "POINT":
             job["points"].append(value)
+        elif key == "COLOR":
+            job["brand_color"] = value
         elif key == "INFO":
             kv = [c.strip() for c in value.split("|")]
             if len(kv) >= 2 and kv[0] and kv[1]:

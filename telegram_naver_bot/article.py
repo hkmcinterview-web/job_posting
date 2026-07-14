@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """뉴스 링크에서 제목/요약/본문/대표사진/출처를 추출합니다."""
 import re
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -145,6 +145,17 @@ def fetch_job_page(url: str) -> dict:
     if not title and soup.title:
         title = soup.title.get_text(strip=True)
 
+    # 회사 로고 후보 — 카드 우상단에 사용 (apple-touch-icon 이 보통 고화질 정사각 로고)
+    logo_url = ""
+    for rel in ("apple-touch-icon", "apple-touch-icon-precomposed", "icon", "shortcut icon"):
+        tag = soup.find("link", rel=lambda v: v and rel in (v if isinstance(v, str) else " ".join(v)).lower())
+        if tag and tag.get("href"):
+            logo_url = urljoin(url, tag["href"])
+            break
+    og_image = og("image")
+    if og_image:
+        og_image = urljoin(url, og_image)
+
     for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
         tag.decompose()
 
@@ -163,6 +174,8 @@ def fetch_job_page(url: str) -> dict:
         "description": og("description"),
         "site": og("site_name") or urlparse(url).netloc,
         "text": text,
+        "logo_url": logo_url,      # link rel 아이콘 (있으면 우선)
+        "og_image_url": og_image,  # og:image — 채용 사이트에선 보통 회사 로고
     }
 
 

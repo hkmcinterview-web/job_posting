@@ -94,6 +94,25 @@ def handle_cafe(tg: TelegramClient, chat_id: int, content: str):
 
 # ── 채용공고 카드 + 카페 게시 ─────────────────────────────
 
+def _fetch_logo(page: dict):
+    """공고 페이지에서 회사 로고 이미지를 받아온다 (실패하면 None → 회사명 뱃지로 대체)."""
+    import io
+
+    from PIL import Image
+
+    from article import fetch_image_bytes
+    for url in (page.get("logo_url"), page.get("og_image_url")):
+        if not url:
+            continue
+        try:
+            img = Image.open(io.BytesIO(fetch_image_bytes(url, referer=page.get("url", ""))))
+            if img.width >= 48 and img.height >= 48:   # 파비콘급(16px)은 제외
+                return img
+        except Exception as e:
+            print(f"[main] 로고 다운로드 실패({url}): {e}")
+    return None
+
+
 def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int):
     job, summary, engine, err = build_job_data(page)
     if job is None:
@@ -101,7 +120,7 @@ def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int):
         return
 
     # 1) 카드 렌더링 → 텔레그램 전송
-    path = render_job_card(job, f"job_{int(time.time())}_{idx}")
+    path = render_job_card(job, f"job_{int(time.time())}_{idx}", logo=_fetch_logo(page))
     caption = " ".join(t.strip() for t in (job.get("title") or "").split("/"))
     tg.send_photo(chat_id, path, caption=caption[:80])
 

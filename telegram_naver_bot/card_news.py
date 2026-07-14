@@ -44,6 +44,11 @@ FONT_SOURCES = {
         "https://raw.githubusercontent.com/google/fonts/main/ofl/jua/Jua-Regular.ttf",
         "https://github.com/google/fonts/raw/main/ofl/jua/Jua-Regular.ttf",
     ],
+    # 채용카드 제목용 — 도현체(익숙하고 시원한 제목 폰트, 배민 도현)
+    "DoHyeon-Regular.ttf": [
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/dohyeon/DoHyeon-Regular.ttf",
+        "https://github.com/google/fonts/raw/main/ofl/dohyeon/DoHyeon-Regular.ttf",
+    ],
 }
 BRAND_FONT_FILE = "Jua-Regular.ttf"
 
@@ -51,7 +56,7 @@ BRAND_FONT_FILE = "Jua-Regular.ttf"
 def _ensure_font(name: str) -> Path:
     config.FONTS_DIR.mkdir(parents=True, exist_ok=True)
     path = config.FONTS_DIR / name
-    if path.exists() and path.stat().st_size > 1_000_000:
+    if path.exists() and path.stat().st_size > 100_000:
         return path
     last_err = None
     for url in FONT_SOURCES[name]:
@@ -59,7 +64,7 @@ def _ensure_font(name: str) -> Path:
             print(f"[card_news] 폰트 다운로드: {url}")
             r = requests.get(url, timeout=120)
             r.raise_for_status()
-            if len(r.content) < 1_000_000:  # LFS 포인터 등 비정상 응답 방지
+            if len(r.content) < 100_000:  # LFS 포인터 등 비정상 응답 방지
                 raise RuntimeError(f"파일이 너무 작음 ({len(r.content)} bytes)")
             path.write_bytes(r.content)
             return path
