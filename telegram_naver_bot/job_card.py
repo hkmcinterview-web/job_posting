@@ -104,7 +104,18 @@ def _make_aurora_bg(accent) -> Image.Image:
     d.ellipse([-380, -240, 260, 320], fill=faint)              # 좌상단 은은하게
     d.ellipse([-320, H - 460, 340, H + 280], fill=soft)        # 좌하단
     d.ellipse([W - 420, H - 260, W + 260, H + 340], fill=faint)  # 우하단 살짝
-    return bg.filter(ImageFilter.GaussianBlur(130))
+    bg = bg.filter(ImageFilter.GaussianBlur(130))
+
+    # 그라데이션 위 문양 — 모서리 동심원 링 (얇은 선, 은은한 톤)
+    d = ImageDraw.Draw(bg)
+    ring = _tint(accent, 0.62)
+    cx, cy = W - 150, 130          # 우상단 링 (로고/제목을 피해 코너에)
+    for r in (170, 230, 290, 350):
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=ring, width=2)
+    cx, cy = -60, H - 120          # 좌하단 링
+    for r in (120, 170, 220):
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=ring, width=2)
+    return bg
 
 
 def _draw_pin(draw, x, y, size=32):
@@ -262,16 +273,34 @@ def render_job_card(job: dict, out_name: str, logo: Image.Image = None):
     info_x0 = W - M - info_w
     info_y0 = H - 66 - len(infos) * info_row_h if infos else H
 
-    # ── 📌 핵심 포인트 (한 줄에 맞게 크기 자동 조절) ──
+    # ── 📌 핵심 포인트 — 전부 같은 크기로, 모든 줄이 한 줄에 들어가는 최대 크기 ──
     points = (job.get("points") or [])[:6]
-    for p in points:
-        max_w = ((info_x0 - M - 44) if (infos and y > info_y0 - 96) else (W - M * 2)) - 46
-        plain = _HL_RE.sub(lambda mm: mm.group(1), p)
-        fit = _fit_font_size(draw, plain, max_w, 36, 27, lambda s: _font(True, s))
-        pf = _font(True, fit)
+    plains = [_HL_RE.sub(lambda mm: mm.group(1), p) for p in points]
+
+    def _point_width(py):
+        """포인트 시작 y 좌표에 따른 가용 폭 (미니표와 겹치는 구간은 좁게)."""
+        narrow = infos and py > info_y0 - 96
+        return ((info_x0 - M - 44) if narrow else (W - M * 2)) - 46
+
+    def _layout_ok(size):
+        f = _font(True, size)
+        py = y
+        for plain in plains:
+            if draw.textlength(plain, font=f) > _point_width(py):
+                return False
+            py += (size + 15) + 16
+        return py - 16 <= H - 44
+
+    size = 36
+    while size > 26 and not _layout_ok(size):
+        size -= 1
+    pf = _font(True, size)
+    line_gap = size + 15
+
+    for p, plain in zip(points, plains):
+        max_w = _point_width(y)
         n_lines = min(2, len(_wrap_keep(draw, plain, pf, max_w)))
-        line_gap = fit + 15
-        if y + n_lines * line_gap > H - 44:   # 이 포인트가 안 들어가면 종료
+        if y + n_lines * line_gap > H - 44:   # 최소 크기로도 안 들어가면 종료
             break
         _draw_pin(draw, M, y + 2)
         y = _draw_point(draw, M + 46, y, p, pf, max_w, line_gap)
