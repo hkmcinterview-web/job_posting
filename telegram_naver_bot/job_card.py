@@ -33,12 +33,18 @@ _HL_RE = re.compile(r"\{\{(.+?)\}\}")
 
 
 def _wrap_keep(draw, text, font, max_width):
-    """글자 단위 줄바꿈 — 문자를 버리지 않아 원문 인덱스가 보존됨(형광 강조 계산용)."""
+    """줄바꿈 — 문자를 버리지 않아 원문 인덱스가 보존됨(형광 강조 계산용).
+    줄이 넘칠 때 가까운 공백이 있으면 거기서 끊어 단어 중간 분리를 피한다."""
     lines, cur = [], ""
     for ch in text:
         if cur and draw.textlength(cur + ch, font=font) > max_width:
-            lines.append(cur)
-            cur = ch
+            sp = cur.rfind(" ")
+            if sp > 0 and len(cur) - sp <= 12:  # 너무 멀지 않은 공백에서만
+                lines.append(cur[:sp + 1])
+                cur = cur[sp + 1:] + ch
+            else:
+                lines.append(cur)
+                cur = ch
         else:
             cur += ch
     lines.append(cur)
@@ -125,7 +131,7 @@ def render_job_card(job: dict, out_name: str):
     y = 128
     for line in title_lines:
         draw.text((M, y), line, font=tf, fill=INK, stroke_width=3, stroke_fill=INK)
-        y += tf.size + 24
+        y += int(tf.size * 1.38)  # 한글 글리프 실제 높이(어센더+디센더)를 고려한 줄 간격
     y += 8
 
     # ── 빨간 뱃지 ──
