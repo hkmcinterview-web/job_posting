@@ -1,11 +1,24 @@
 # -*- coding: utf-8 -*-
-"""텔레그램 Bot API 클라이언트 — getUpdates 롱폴링 + 메시지/사진 전송."""
+"""텔레그램 Bot API 클라이언트 — getUpdates 롱폴링 + 메시지/사진 전송/수신."""
 import requests
 
 
 class TelegramClient:
     def __init__(self, token: str):
         self.base = f"https://api.telegram.org/bot{token}"
+        self.file_base = f"https://api.telegram.org/file/bot{token}"
+
+    def download_file(self, file_id: str) -> bytes:
+        """사용자가 보낸 사진/파일을 내려받는다 (getFile → 파일 경로 → 다운로드)."""
+        r = requests.get(f"{self.base}/getFile", params={"file_id": file_id}, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"getFile 실패: {data}")
+        file_path = data["result"]["file_path"]
+        r2 = requests.get(f"{self.file_base}/{file_path}", timeout=60)
+        r2.raise_for_status()
+        return r2.content
 
     def get_updates(self, offset=None, timeout=50):
         params = {"timeout": timeout, "allowed_updates": '["message"]'}

@@ -24,11 +24,15 @@ _FIELD_RE = re.compile(r"^\s*(COMPANY|TITLE|DEADLINE|BADGE|TABLE_HEAD|TABLE_ROW|
                        r"\s*:\s*(.*)$", re.IGNORECASE)
 
 
-def _build_prompt(page: dict) -> str:
-    return (
-        "다음은 기업 채용공고 내용입니다. 이걸로 SNS용 '채용공고 카드' 이미지 1장과\n"
-        "네이버 카페 게시글을 만들 겁니다. 아래 마커 형식을 정확히 지켜 출력하세요.\n"
-        "다른 인사말/설명 없이 형식만 출력합니다.\n\n"
+def _build_prompt(page: dict, with_images: bool = False) -> str:
+    intro = ("다음은 기업 채용공고 내용입니다. 이걸로 SNS용 '채용공고 카드' 이미지 1장과\n"
+             "네이버 카페 게시글을 만들 겁니다. 아래 마커 형식을 정확히 지켜 출력하세요.\n"
+             "다른 인사말/설명 없이 형식만 출력합니다.\n\n")
+    if with_images:
+        intro = ("첨부한 이미지는 기업 채용공고를 캡처한 것입니다. 이미지 속 내용을 꼼꼼히 읽고,\n"
+                 "SNS용 '채용공고 카드'와 네이버 카페 게시글용으로 아래 마커 형식에 맞춰 추출하세요.\n"
+                 "다른 인사말/설명 없이 형식만 출력합니다.\n\n")
+    return intro + (
         "<<<JOB>>>\n"
         "COMPANY: 회사명 (간결하게, 예: 현대자동차)\n"
         "TITLE: 카드 큰 제목 1~2줄 — 줄 구분은 / (각 줄 4~12자, 회사명 포함, 예: 현대자동차/신입 채용)\n"
@@ -107,10 +111,12 @@ def _parse_job(text: str) -> dict:
     return job
 
 
-def build_job_data(page: dict):
-    """returns (job_dict|None, summary, engine, error)"""
-    prompt = _build_prompt(page)
-    text, engine, error = generate_text(prompt, temperature=0.3)
+def build_job_data(page: dict, images=None):
+    """returns (job_dict|None, summary, engine, error)
+
+    images: [(mime_type, base64), ...] — 채용공고 캡처 사진 (링크 대신 사진으로 받은 경우)"""
+    prompt = _build_prompt(page, with_images=bool(images))
+    text, engine, error = generate_text(prompt, temperature=0.3, images=images)
     if not text:
         return None, "", engine, error
 

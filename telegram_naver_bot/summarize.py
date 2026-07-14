@@ -170,10 +170,15 @@ def build_card_options(article: dict, n_options: int = 3):
 
 # ── ① 구글 Gemini (무료 등급) ────────────────────────────
 
-def _gemini_generate(prompt: str, temperature: float = 0.9) -> str:
-    """Gemini 에 프롬프트를 보내 원문 텍스트를 받는다 (모델 자동 대체 포함)."""
+def _gemini_generate(prompt: str, temperature: float = 0.9, images=None) -> str:
+    """Gemini 에 프롬프트를 보내 원문 텍스트를 받는다 (모델 자동 대체 포함).
+
+    images: [(mime_type, base64문자열), ...] — 채용공고 캡처 등 이미지 입력 (비전)."""
+    parts = [{"text": prompt}]
+    for mime, b64 in (images or []):
+        parts.append({"inline_data": {"mime_type": mime, "data": b64}})
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
+        "contents": [{"parts": parts}],
         "generationConfig": {"temperature": temperature},
     }
     # 설정 모델을 먼저 시도하고, 실패(모델 없음/그 모델만 quota 0 등)하면 대체 모델들을 순서대로 시도
@@ -217,14 +222,19 @@ def _build_cards_gemini(prompt: str):
 
 # ── ② Claude API (유료) ──────────────────────────────────
 
-def _claude_generate(prompt: str) -> str:
+def _claude_generate(prompt: str, images=None) -> str:
     import anthropic
+
+    content = [{"type": "image",
+                "source": {"type": "base64", "media_type": mime, "data": b64}}
+               for mime, b64 in (images or [])]
+    content.append({"type": "text", "text": prompt})
 
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     response = client.messages.create(
         model=config.ANTHROPIC_MODEL,
         max_tokens=2048,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": content}],
     )
     if response.stop_reason == "refusal":
         return ""
@@ -238,18 +248,20 @@ def _build_cards_claude(prompt: str):
 
 # ── 공용: 다른 기능(채용공고 등)에서도 같은 AI 폴백 체인을 쓰도록 공개 ──
 
-def generate_text(prompt: str, temperature: float = 0.4):
-    """프롬프트를 AI 에 보내 원문 텍스트를 받는다. returns (text, engine, error)."""
+def generate_text(prompt: str, temperature: float = 0.4, images=None):
+    """프롬프트(+이미지)를 AI 에 보내 원문 텍스트를 받는다. returns (text, engine, error).
+
+    images: [(mime_type, base64), ...] — 채용공고 캡처 사진 등."""
     error = ""
     if config.GEMINI_API_KEY:
         try:
-            return _gemini_generate(prompt, temperature=temperature), "gemini", ""
+            return _gemini_generate(prompt, temperature=temperature, images=images), "gemini", ""
         except Exception as e:
             error = f"Gemini: {e}"
             print(f"[summarize] Gemini 호출 실패: {e}")
     if config.ANTHROPIC_API_KEY:
         try:
-            return _claude_generate(prompt), "claude", ""
+            return _claude_generate(prompt, images=images), "claude", ""
         except Exception as e:
             error = f"Claude: {e}"
             print(f"[summarize] Claude 호출 실패: {e}")

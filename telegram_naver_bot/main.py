@@ -54,10 +54,11 @@ HELP_TEXT = (
     "  https://n.news...\n\n"
     "💼 채용공고 카드 + 카페 게시:\n"
     "  첫 줄에 '채용' 이라고 쓰고, 채용공고 링크를 넣으세요.\n"
-    "  (링크가 안 읽히는 사이트면 공고 내용을 통째로 복사해 붙여도 됩니다)\n"
     "  예)\n"
     "  채용\n"
-    "  https://recruit..."
+    "  https://recruit...\n"
+    "  ▸ 링크가 안 읽히면: 공고 내용을 복사해 '채용' 뒤에 붙이거나,\n"
+    "  ▸ 공고 화면을 캡처해서 '채용' 캡션과 함께 사진으로 보내세요 (여러 장 가능)"
 )
 
 # 링크당 카드 선택 후보 개수 (2~3)
@@ -113,8 +114,8 @@ def _fetch_logo(page: dict):
     return None
 
 
-def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int):
-    job, summary, engine, err = build_job_data(page)
+def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int, images=None):
+    job, summary, engine, err = build_job_data(page, images=images)
     if job is None:
         tg.send_message(chat_id, f"⚠️ 채용공고 {idx} 분석 실패: {err}")
         return
@@ -184,7 +185,30 @@ def handle_job(tg: TelegramClient, chat_id: int, content: str):
         _handle_one_job(tg, chat_id, page, 1)
         return
 
-    tg.send_message(chat_id, "⚠️ '채용' 아래에 채용공고 링크(또는 공고 내용 전체)를 함께 보내주세요.")
+    tg.send_message(chat_id, "⚠️ '채용' 아래에 채용공고 링크(또는 공고 내용 전체)를 함께 보내주세요.\n"
+                             "공고가 이미지거나 링크가 안 읽히면, 공고 화면을 캡처해서\n"
+                             "'채용' 캡션과 함께 사진으로 보내주세요.")
+
+
+def handle_job_photos(tg: TelegramClient, chat_id: int, caption_rest: str, file_ids: list):
+    """캡처 사진으로 받은 채용공고 — AI 비전으로 이미지에서 직접 추출."""
+    import base64
+
+    tg.send_message(chat_id, f"⏳ 공고 사진 {len(file_ids)}장 분석 중...")
+    images = []
+    for fid in file_ids[:5]:
+        try:
+            raw = tg.download_file(fid)
+            images.append(("image/jpeg", base64.b64encode(raw).decode()))
+        except Exception as e:
+            print(f"[main] 사진 다운로드 실패: {e}")
+    if not images:
+        tg.send_message(chat_id, "⚠️ 사진을 내려받지 못했어요. 다시 보내주세요.")
+        return
+
+    page = {"url": "", "title": "", "description": "",
+            "text": caption_rest.strip() or "(첨부 이미지 참조)"}
+    _handle_one_job(tg, chat_id, page, 1, images=images)
 
 
 # ── 카드뉴스 제작 (헤드라인 후보 선택 방식) ─────────────────
@@ -340,17 +364,33 @@ def main():
             time.sleep(5)
             continue
 
+        # 같은 배치 안의 사진 앨범(media_group)을 하나로 묶는다
+        photo_groups = {}   # group_key -> {"chat_id", "caption", "file_ids"}
+
         for upd in updates:
             offset = upd["update_id"] + 1
             msg = upd.get("message") or {}
             chat_id = (msg.get("chat") or {}).get("id")
-            text = msg.get("text") or msg.get("caption") or ""
-            if chat_id is None or not text.strip():
+            if chat_id is None:
                 continue
-            print(f"[main] 메시지 수신 chat_id={chat_id}")
             if config.TELEGRAM_ALLOWED_CHAT_IDS and chat_id not in config.TELEGRAM_ALLOWED_CHAT_IDS:
                 print(f"[main] 허용되지 않은 chat_id={chat_id} — 무시")
                 continue
+
+            # 사진 메시지 — 앨범 단위로 모아서 아래에서 한 번에 처리
+            if msg.get("photo"):
+                key = msg.get("media_group_id") or f"single_{msg.get('message_id')}"
+                g = photo_groups.setdefault(key, {"chat_id": chat_id, "caption": "",
+                                                  "file_ids": []})
+                g["file_ids"].append(msg["photo"][-1]["file_id"])  # 가장 큰 해상도
+                if msg.get("caption"):
+                    g["caption"] = (g["caption"] + "\n" + msg["caption"]).strip()
+                continue
+
+            text = msg.get("text") or ""
+            if not text.strip():
+                continue
+            print(f"[main] 메시지 수신 chat_id={chat_id}")
             try:
                 # 카드 후보 선택 대기 중이면 숫자 답장인지 먼저 확인
                 if chat_id in PENDING_CARD and _try_resolve_selection(tg, chat_id, text):
@@ -364,6 +404,24 @@ def main():
                 traceback.print_exc()
                 try:
                     tg.send_message(chat_id, f"❌ 처리 중 오류: {e}")
+                except Exception:
+                    pass
+
+        # 모아둔 사진 앨범 처리 — '채용' 캡션이면 공고 사진으로 분석
+        for g in photo_groups.values():
+            cid = g["chat_id"]
+            print(f"[main] 사진 {len(g['file_ids'])}장 수신 chat_id={cid}")
+            try:
+                mode, rest = detect_mode(g["caption"])
+                if mode == "job":
+                    handle_job_photos(tg, cid, rest, g["file_ids"])
+                else:
+                    tg.send_message(cid, "🖼 사진을 받았어요. 채용공고 캡처라면 사진에 "
+                                         "'채용' 이라는 캡션(설명)을 달아서 다시 보내주세요.")
+            except Exception as e:
+                traceback.print_exc()
+                try:
+                    tg.send_message(cid, f"❌ 사진 처리 중 오류: {e}")
                 except Exception:
                     pass
 
