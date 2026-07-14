@@ -10,10 +10,9 @@
   - 📌 포인트: 한 줄에 들어가도록 글자 크기 자동 축소 ({{...}} 는 연두 형광)
   - 우하단 요약 미니표: 라벨 칸은 브랜드 컬러 연한 톤
 """
-import math
 import re
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 import config
 from card_news import _brand_font, _draw_youtube, _ensure_font, _font
@@ -93,47 +92,19 @@ def _fit_font_size(draw, text, max_width, start, minimum, font_fn):
     return minimum
 
 
-def _icon_gear(draw, cx, cy, r, color, width=9, teeth=8):
-    """기어(톱니바퀴) 라인 아이콘."""
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=color, width=width)
-    ir = r * 0.42
-    draw.ellipse([cx - ir, cy - ir, cx + ir, cy + ir], outline=color, width=width)
-    for i in range(teeth):
-        a = math.pi * 2 * i / teeth
-        x0, y0 = cx + math.cos(a) * r, cy + math.sin(a) * r
-        x1, y1 = cx + math.cos(a) * r * 1.20, cy + math.sin(a) * r * 1.20
-        draw.line([x0, y0, x1, y1], fill=color, width=max(width, int(r * 0.14)))
-
-
-def _icon_car(draw, x, y, w, color, width=9):
-    """자동차 옆모습 라인 아이콘."""
-    h = w * 0.30
-    base = y + h * 0.78
-    pts = [(x, base), (x + w * 0.06, y + h * 0.46), (x + w * 0.26, y + h * 0.38),
-           (x + w * 0.38, y + h * 0.04), (x + w * 0.70, y + h * 0.04),
-           (x + w * 0.84, y + h * 0.38), (x + w * 0.97, y + h * 0.48), (x + w, base),
-           (x, base)]
-    draw.line(pts, fill=color, width=width, joint="curve")
-    for wx in (x + w * 0.24, x + w * 0.78):
-        r = h * 0.26
-        draw.ellipse([wx - r, base - r, wx + r, base + r], outline=color, width=width)
-
-
-def _icon_bolt(draw, x, y, s, color, width=8):
-    """번개(전동화) 라인 아이콘."""
-    pts = [(x + s * 0.48, y), (x, y + s * 0.58), (x + s * 0.36, y + s * 0.58),
-           (x + s * 0.22, y + s), (x + s * 0.82, y + s * 0.36), (x + s * 0.44, y + s * 0.36),
-           (x + s * 0.48, y)]
-    draw.line(pts, fill=color, width=width, joint="curve")
-
-
-def _draw_bg_pictograms(draw, accent):
-    """자동차산업 픽토그램을 아주 연하게 배경에 배치 (기어·자동차·번개)."""
-    c = _tint(accent, 0.90)
-    _icon_gear(draw, W - 70, 330, 130, c)            # 우측 큰 기어 (화면 밖으로 살짝)
-    _icon_gear(draw, W - 268, 458, 56, c, width=7)   # 작은 기어 (맞물림)
-    _icon_car(draw, 26, H - 210, 330, c)             # 좌하단 자동차
-    _icon_bolt(draw, 400, H - 190, 110, c)           # 자동차 옆 번개(전동화)
+def _make_aurora_bg(accent) -> Image.Image:
+    """감각적인 그라데이션 블롭(오로라) 배경 — 브랜드 컬러의 파스텔 톤 원을
+    모서리에 크게 깔고 강하게 블러 처리해 부드럽게 번지는 느낌을 만든다."""
+    bg = Image.new("RGB", (W, H), (250, 251, 253))
+    d = ImageDraw.Draw(bg)
+    strong = _tint(accent, 0.50)   # 진한 파스텔
+    soft = _tint(accent, 0.72)     # 연한 파스텔
+    faint = _tint(accent, 0.84)
+    d.ellipse([W - 560, -320, W + 300, 440], fill=strong)      # 우상단 큰 블롭
+    d.ellipse([-380, -240, 260, 320], fill=faint)              # 좌상단 은은하게
+    d.ellipse([-320, H - 460, 340, H + 280], fill=soft)        # 좌하단
+    d.ellipse([W - 420, H - 260, W + 260, H + 340], fill=faint)  # 우하단 살짝
+    return bg.filter(ImageFilter.GaussianBlur(130))
 
 
 def _draw_pin(draw, x, y, size=32):
@@ -197,9 +168,8 @@ def render_job_card(job: dict, out_name: str, logo: Image.Image = None):
     config.CARDS_DIR.mkdir(parents=True, exist_ok=True)
     accent = _accent_color(job)
 
-    img = Image.new("RGB", (W, H), BG)
+    img = _make_aurora_bg(accent)
     draw = ImageDraw.Draw(img)
-    _draw_bg_pictograms(draw, accent)
     draw.rectangle([0, 0, W, 14], fill=accent)   # 최상단 브랜드 컬러 바
 
     # ── 상단: 마감(좌) · 브랜드(우) ──
