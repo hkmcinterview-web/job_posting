@@ -115,6 +115,31 @@ def _post_urllib(label: str) -> str:
     return f"✅ {result.get('articleUrl') or result.get('cafeUrl') or '(URL 확인 불가)'}"
 
 
+def enc_html_entities(text: str) -> str:
+    """한글 등 비ASCII 문자를 전부 HTML 숫자 엔티티(&#44032;)로 변환.
+    결과가 순수 ASCII 라서 서버가 UTF-8/MS949 어느 쪽으로 해석해도 동일 —
+    인코딩 오해석 자체가 불가능해지고, 브라우저가 엔티티를 한글로 그려줌."""
+    return "".join(c if ord(c) < 128 else f"&#{ord(c)};" for c in text)
+
+
+def _post_entities(label: str) -> str:
+    """G: 한글을 HTML 엔티티로 바꿔서 ASCII 만 전송 (전송 방식은 A와 동일)."""
+    url = (f"https://openapi.naver.com/v1/cafe/{config.NAVER_CAFE_CLUB_ID}"
+           f"/menu/{config.NAVER_CAFE_MENU_ID}/articles")
+    subject = enc_html_entities(f"[TEST-{label}] {TEST_KOREAN}")
+    content = enc_html_entities(f"[TEST-{label}] {TEST_KOREAN}")
+    payload = f"subject={enc_utf8_single(subject)}&content={enc_utf8_single(content)}"
+
+    def _send(token):
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        return requests.post(url, data=payload.encode("utf-8"), headers=headers, timeout=60)
+
+    return _do(_send)
+
+
 def _do(send_fn) -> str:
     token = _get_access_token()
     resp = send_fn(token)
@@ -141,8 +166,12 @@ def main():
     print("[F-urllib] 게시 중...")
     print("  →", _post_urllib("F-urllib"))
 
+    print("[G-entity] 게시 중...")
+    print("  →", _post_entities("G-entity"))
+
     print("\n위 글들을 카페에서 열어보고, 한글이 정상으로 보이는 게 있으면")
-    print("그 라벨(A/B/C/D/E/F)을 알려주세요. 전부 깨져 있으면 그것도 알려주세요.")
+    print("그 라벨(A~G)을 알려주세요. 특히 G는 제목/본문을 나눠서 알려주세요")
+    print("(예: 'G 본문은 정상, 제목은 &#...; 글자가 그대로 보임').")
 
 
 if __name__ == "__main__":
