@@ -10,6 +10,7 @@
   - 📌 포인트: 한 줄에 들어가도록 글자 크기 자동 축소 ({{...}} 는 연두 형광)
   - 우하단 요약 미니표: 라벨 칸은 브랜드 컬러 연한 톤
 """
+import math
 import re
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -105,17 +106,42 @@ def _make_aurora_bg(accent) -> Image.Image:
     d.ellipse([-320, H - 460, 340, H + 280], fill=soft)        # 좌하단
     d.ellipse([W - 420, H - 260, W + 260, H + 340], fill=faint)  # 우하단 살짝
     bg = bg.filter(ImageFilter.GaussianBlur(130))
+    base = bg.convert("RGBA")
 
-    # 그라데이션 위 문양 — 모서리 동심원 링 (얇은 선, 은은한 톤)
-    d = ImageDraw.Draw(bg)
-    ring = _tint(accent, 0.62)
-    cx, cy = W - 150, 130          # 우상단 링 (로고/제목을 피해 코너에)
-    for r in (170, 230, 290, 350):
-        d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=ring, width=2)
-    cx, cy = -60, H - 120          # 좌하단 링
-    for r in (120, 170, 220):
-        d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=ring, width=2)
-    return bg
+    # ── 몽환적 보케(빛망울) — 크기·농도가 다른 부드러운 원들 ──
+    bokeh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(bokeh)
+    tone = _tint(accent, 0.42)
+    orbs = [  # (cx, cy, 반지름, 색, 투명도) — 글 영역을 피해 가장자리 위주로
+        (935, 250, 110, (255, 255, 255), 95),
+        (770, 105, 46, tone, 70),
+        (1035, 470, 62, (255, 255, 255), 80),
+        (620, 62, 28, (255, 255, 255), 85),
+        (135, 420, 60, (255, 255, 255), 55),
+        (52, 300, 30, tone, 55),
+        (1000, 1090, 92, (255, 255, 255), 80),
+        (880, 1265, 42, tone, 65),
+        (105, 1160, 95, (255, 255, 255), 65),
+        (255, 1300, 46, tone, 55),
+    ]
+    for cx, cy, r, col, a in orbs:
+        bd.ellipse([cx - r, cy - r, cx + r, cy + r], fill=col + (a,))
+    bokeh = bokeh.filter(ImageFilter.GaussianBlur(16))
+    base = Image.alpha_composite(base, bokeh)
+
+    # ── 흐르는 웨이브 곡선 — 은은하게 두어 줄 ──
+    waves = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    wd = ImageDraw.Draw(waves)
+    wave_col = _tint(accent, 0.52) + (110,)
+    for y0, amp, period, phase in ((92, 30, 640, 0.0), (128, 34, 700, 1.2),
+                                   (1285, 30, 620, 0.5), (1320, 34, 680, 1.8)):
+        pts = [(x, y0 + amp * math.sin(x / period * 2 * math.pi + phase))
+               for x in range(-10, W + 11, 8)]
+        wd.line(pts, fill=wave_col, width=3, joint="curve")
+    waves = waves.filter(ImageFilter.GaussianBlur(1.4))
+    base = Image.alpha_composite(base, waves)
+
+    return base.convert("RGB")
 
 
 def _draw_pin(draw, x, y, size=32):
