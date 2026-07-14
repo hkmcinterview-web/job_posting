@@ -51,19 +51,28 @@ def _get_access_token() -> str:
     return tokens["access_token"]
 
 
+def _to_html_entities(text: str) -> str:
+    """한글 등 비ASCII 문자를 전부 HTML 숫자 엔티티(&#44032;)로 변환.
+
+    이 카페는 구형(MS949) 스킨이라 UTF-8 바이트로 보낸 한글을 서버가 잘못
+    해석해 글자가 깨집니다. 엔티티로 바꾸면 전송 내용이 순수 ASCII 뿐이라
+    인코딩 오해석이 원천적으로 불가능하고, 화면에서 브라우저가 한글로
+    렌더링합니다 (제목/본문 모두 정상 표시되는 것을 실측으로 확인함)."""
+    return "".join(c if ord(c) < 128 else f"&#{ord(c)};" for c in text or "")
+
+
 def _encode_field(text: str) -> str:
-    """subject/content 인코딩. 실측 결과 네이버 API는 UTF-8을 '한 번만' 퍼센트
-    인코딩한 값만 정상 접수합니다 (CP949·이중 인코딩은 HTTP 403/999로 거부됨).
-    표시 단계에서 여전히 깨져 보이는 문제는 별도 원인(카페 페이지 인코딩 추정 등)을
-    진단 중입니다 — test_naver_read.py 참고."""
-    return quote((text or "").encode("utf-8"), safe="")
+    """subject/content 인코딩: HTML 엔티티 변환 후 퍼센트 인코딩 1회.
+    (CP949·이중 퍼센트 인코딩은 HTTP 403/999로 거부되는 것을 실측으로 확인)"""
+    return quote(_to_html_entities(text).encode("utf-8"), safe="")
 
 
 def post_article(subject: str, content_html: str, image_paths=None) -> dict:
     """카페에 글을 작성하고 {'articleId': ..., 'articleUrl': ...} 를 반환합니다.
 
-    subject/content 는 UTF-8로 인코딩 후 퍼센트 인코딩 1회만 적용해서 보냅니다
-    (CP949·이중 인코딩은 서버가 HTTP 403/999로 거부하는 것을 실측으로 확인함).
+    subject/content 는 한글을 HTML 엔티티로 바꾼 뒤(_to_html_entities 참고)
+    UTF-8 퍼센트 인코딩 1회만 적용해서 보냅니다 — 이 조합이 글자 깨짐 없이
+    정상 표시되는 유일한 방식임을 실측으로 확인했습니다.
 
     ⚠️ 이미지 없이 보낼 때(x-www-form-urlencoded)는 이미 퍼센트 인코딩된 문자열을
     requests 의 data=dict 로 넘기면 안 됩니다 — requests 가 폼 인코딩 과정에서
@@ -87,12 +96,13 @@ def post_article(subject: str, content_html: str, image_paths=None) -> dict:
                     f = open(p, "rb")
                     opened_files.append(f)
                     files.append(("image", (p.name, f, "image/png")))
-                # 멀티파트는 이중 인코딩 문제가 없어 원본 텍스트를 그대로 보냄
-                req_data = {"subject": subject, "content": content_html}
+                # 멀티파트도 한글 깨짐 방지를 위해 HTML 엔티티로 변환해서 보냄
+                req_data = {"subject": _to_html_entities(subject),
+                            "content": _to_html_entities(content_html)}
                 return requests.post(url, data=req_data, files=files,
                                      headers=headers, timeout=60)
 
-            # 이미지 없음 — CP949 로 인코딩한 뒤, 이중 인코딩을 피하기 위해
+            # 이미지 없음 — 이중 퍼센트 인코딩을 피하기 위해
             # dict 가 아니라 완성된 문자열을 raw bytes 로 직접 전송
             payload = f"subject={_encode_field(subject)}&content={_encode_field(content_html)}"
             headers["Content-Type"] = "application/x-www-form-urlencoded"
