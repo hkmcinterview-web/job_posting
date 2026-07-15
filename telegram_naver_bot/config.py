@@ -52,6 +52,8 @@ POST_FOOTER = os.getenv("POST_FOOTER", "")   # 카페 글 하단에 붙는 문�
 # 카페 글에서 링크를 클릭 가능한 <a> 태그로 넣을지(1) 순수 텍스트로 넣을지(0).
 # 네이버 카페 API가 링크 태그가 많은 글을 스팸으로 보고 999로 막는 경우가 있어 기본 0.
 CAFE_LINKS_AS_ANCHOR = os.getenv("CAFE_LINKS_AS_ANCHOR", "0") == "1"
+# 단축주소(buly.kr 등)를 원본 주소로 펼쳐서 올릴지 — 카페 스팸필터(999) 회피용. 기본 켬.
+CAFE_EXPAND_SHORT_LINKS = os.getenv("CAFE_EXPAND_SHORT_LINKS", "1") == "1"
 MAX_LINKS = int(os.getenv("MAX_LINKS", "5"))              # 메시지당 처리할 최대 링크 수
 MAX_CARDS_PER_LINK = int(os.getenv("MAX_CARDS_PER_LINK", "3"))  # 링크당 카드뉴스 장수(1~3)
 SEND_CARDS_TO_TELEGRAM = os.getenv("SEND_CARDS_TO_TELEGRAM", "1") == "1"

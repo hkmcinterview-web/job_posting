@@ -30,6 +30,7 @@ from card_news import render_cards
 from editor import build_cafe_post, build_job_post
 from job_card import render_job_card
 from job_summary import build_job_data
+from linkutil import expand_short_links
 from message_parser import detect_mode, extract_links, split_title_body
 from naver_cafe import post_article
 from summarize import build_card_options
@@ -77,6 +78,13 @@ def handle_cafe(tg: TelegramClient, chat_id: int, content: str):
     if not (title or body.strip()):
         tg.send_message(chat_id, "⚠️ '카페' 아래에 올릴 내용을 함께 보내주세요.")
         return
+
+    # 단축주소(buly.kr 등)는 원본 주소로 펼친다 — 네이버 스팸필터(999) 회피
+    if config.CAFE_EXPAND_SHORT_LINKS:
+        try:
+            body = expand_short_links(body)
+        except Exception as e:
+            print(f"[main] 단축주소 펼침 실패(무시): {e}")
 
     subject, content_html = build_cafe_post(title, body)
 

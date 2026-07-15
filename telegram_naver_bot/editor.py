@@ -76,11 +76,5 @@ def build_job_post(job: dict, summary: str, url: str) -> tuple:
     if url:
         body += f"\n\n▶ 공고 원문 / 지원하기\n{url}"
 
-    parts = []
-    if config.POST_HEADER:
-        parts.append(config.POST_HEADER)
-    parts.extend(_body_html(body))
-    if config.POST_FOOTER:
-        parts.append(config.POST_FOOTER)
-
-    return subject, "\n".join(parts)
+    # 채용공고 글에는 자동작성 안내(POST_FOOTER)를 붙이지 않는다
+    return subject, "\n".join(_body_html(body))
