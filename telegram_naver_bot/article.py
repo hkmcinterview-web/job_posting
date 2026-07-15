@@ -129,28 +129,53 @@ def fetch_article(url: str) -> dict:
 
 def _rendered_page_text(url: str):
     """자바스크립트로만 그려지는 페이지 폴백 — 진짜 브라우저(Playwright)로 열어서
-    렌더링이 끝난 뒤의 텍스트를 수집한다. playwright 미설치면 빈 값 반환.
+    렌더링이 끝난 뒤의 텍스트를 수집한다. returns (title, text, screenshot|None)
 
-    설치(한 번만):  pip install playwright  →  playwright install chromium"""
+    - iframe 안쪽 문서까지 전부 뒤져서 텍스트를 모은다 (채용 사이트가 상세 내용을
+      iframe 에 넣는 경우가 많음)
+    - 그래도 텍스트가 거의 없으면(공고가 이미지인 경우) 페이지 전체 스크린샷을
+      찍어서 반환 — AI 비전으로 이미지를 직접 읽게 한다
+    - playwright 미설치면 빈 값 반환. 설치:  pip install playwright → playwright install chromium"""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         print("[article] playwright 미설치 — 브라우저 렌더링 폴백 생략")
-        return "", ""
+        return "", "", None
+    screenshot = None
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
             page = browser.new_page(user_agent=HEADERS["User-Agent"])
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(4000)   # 스크립트가 내용을 그릴 시간
+                page.wait_for_timeout(3000)   # 스크립트가 내용을 그릴 시간
+                try:  # 지연 로딩 대비 스크롤
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                except Exception:
+                    pass
+                page.wait_for_timeout(2500)
                 title = page.title() or ""
-                text = page.evaluate("() => document.body ? document.body.innerText : ''")
+                texts = []
+                for frame in page.frames:   # 메인 문서 + 모든 iframe
+                    try:
+                        t = frame.evaluate("() => document.body ? document.body.innerText : ''")
+                        if t and t.strip():
+                            texts.append(t)
+                    except Exception:
+                        pass
+                text = "\n".join(texts)
+                if len(" ".join(text.split())) < 300:
+                    try:  # 텍스트가 거의 없음 → 공고가 이미지일 가능성, 화면을 통째로 캡처
+                        page.evaluate("window.scrollTo(0, 0)")
+                        screenshot = page.screenshot(full_page=True, type="jpeg", quality=80)
+                        print(f"[article] 텍스트가 부족해 전체 화면 캡처 ({len(screenshot)} bytes)")
+                    except Exception as e:
+                        print(f"[article] 화면 캡처 실패: {e}")
             finally:
                 browser.close()
     except Exception as e:
         print(f"[article] 브라우저 렌더링 실패({url}): {e}")
-        return "", ""
+        return "", "", None
 
     lines, prev = [], None
     for raw in (text or "").split("\n"):
@@ -159,7 +184,7 @@ def _rendered_page_text(url: str):
             continue
         prev = line
         lines.append(line)
-    return title, "\n".join(lines)[:9000]
+    return title, "\n".join(lines)[:9000], screenshot
 
 
 def fetch_job_page(url: str) -> dict:
@@ -204,12 +229,15 @@ def fetch_job_page(url: str) -> dict:
     text = "\n".join(lines)[:9000]
 
     # 내용이 거의 없으면 자바스크립트 렌더링 페이지로 보고 실제 브라우저로 재시도
+    screenshot = None
     if len(text) < 300:
-        r_title, r_text = _rendered_page_text(url)
+        r_title, r_text, screenshot = _rendered_page_text(url)
         if len(r_text) > len(text):
             print(f"[article] 브라우저 렌더링으로 {len(r_text)}자 수집 (일반 방식: {len(text)}자)")
             text = r_text
             title = title or r_title
+        if len(text) >= 300:
+            screenshot = None   # 텍스트를 충분히 얻었으면 캡처는 불필요
 
     return {
         "url": url,
@@ -219,6 +247,7 @@ def fetch_job_page(url: str) -> dict:
         "text": text,
         "logo_url": logo_url,      # link rel 아이콘 (있으면 우선)
         "og_image_url": og_image,  # og:image — 채용 사이트에선 보통 회사 로고
+        "screenshot": screenshot,  # 텍스트를 못 읽었을 때의 전체 화면 캡처 (jpeg bytes)
     }
 
 

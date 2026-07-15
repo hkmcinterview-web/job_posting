@@ -171,6 +171,18 @@ def handle_job(tg: TelegramClient, chat_id: int, content: str):
             tg.send_message(chat_id, f"⏳ 채용공고 {i}/{len(links)} 분석 중...")
             try:
                 page = fetch_job_page(url)
+
+                # 텍스트를 못 읽었지만 화면 캡처는 성공 → 캡처 이미지를 AI 비전으로 분석
+                if len(page.get("text") or "") < 150 and page.get("screenshot"):
+                    import base64
+                    tg.send_message(chat_id,
+                                    f"🖼 링크 {i}: 글자를 못 읽는 사이트라 화면을 캡처해서 "
+                                    "이미지로 분석합니다...")
+                    shot = base64.b64encode(page["screenshot"]).decode()
+                    _handle_one_job(tg, chat_id, page, i,
+                                    images=[("image/jpeg", shot)])
+                    continue
+
                 if len(page.get("text") or "") < 150:
                     try:
                         import playwright  # noqa: F401 — 설치 여부만 확인
