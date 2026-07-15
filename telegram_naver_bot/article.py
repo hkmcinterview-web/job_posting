@@ -164,8 +164,8 @@ def _rendered_page_text(url: str):
                     except Exception:
                         pass
                 text = "\n".join(texts)
-                if len(" ".join(text.split())) < 300:
-                    try:  # 텍스트가 거의 없음 → 공고가 이미지일 가능성, 화면을 통째로 캡처
+                if len(" ".join(text.split())) < 600:
+                    try:  # 텍스트가 부실 → 상세가 이미지일 가능성, 화면을 통째로 캡처
                         page.evaluate("window.scrollTo(0, 0)")
                         screenshot = page.screenshot(full_page=True, type="jpeg", quality=80)
                         print(f"[article] 텍스트가 부족해 전체 화면 캡처 ({len(screenshot)} bytes)")
@@ -228,15 +228,17 @@ def fetch_job_page(url: str) -> dict:
         lines.append(line)
     text = "\n".join(lines)[:9000]
 
-    # 내용이 거의 없으면 자바스크립트 렌더링 페이지로 보고 실제 브라우저로 재시도
+    # 내용이 부실하면 자바스크립트 렌더링 페이지로 보고 실제 브라우저로 재시도.
+    # 채용공고는 상세를 이미지로 올리는 경우가 많아, 텍스트가 넉넉히 안 나오면
+    # 전체 화면 캡처를 확보해 AI 비전으로 읽게 한다 (임계값을 넉넉히 600자로).
     screenshot = None
-    if len(text) < 300:
+    if len(text) < 600:
         r_title, r_text, screenshot = _rendered_page_text(url)
         if len(r_text) > len(text):
             print(f"[article] 브라우저 렌더링으로 {len(r_text)}자 수집 (일반 방식: {len(text)}자)")
             text = r_text
             title = title or r_title
-        if len(text) >= 300:
+        if len(text) >= 600:
             screenshot = None   # 텍스트를 충분히 얻었으면 캡처는 불필요
 
     return {
