@@ -3,7 +3,9 @@
 
 사용자가 직접 편집해서 보낸 텍스트의 레이아웃을 최대한 보존합니다:
 - 줄바꿈은 그대로, 빈 줄은 여백으로
-- 링크는 쓴 위치에서 클릭 가능한 링크로
+- 링크는 순수 텍스트로 (네이버 카페 API가 <a> 링크태그가 많은 글을 스팸으로
+  보고 HTTP 999 로 거부하는 것을 실측으로 확인 — 클릭 링크 대신 텍스트로 넣음.
+  .env 에서 CAFE_LINKS_AS_ANCHOR=1 로 두면 다시 클릭 링크로 만들 수 있음)
 - POST_HEADER / POST_FOOTER (.env) 가 본문 위/아래에 붙습니다
 """
 import datetime as dt
@@ -17,7 +19,10 @@ TRAILING_PUNCT = ").,>]\"'”’"
 
 
 def _linkify(line: str) -> str:
-    """한 줄 안의 URL 을 클릭 가능한 <a> 로, 나머지는 HTML 이스케이프."""
+    """한 줄을 HTML 로 변환. 기본은 URL 도 순수 텍스트(이스케이프만) — 카페 스팸필터 회피.
+    CAFE_LINKS_AS_ANCHOR=1 일 때만 클릭 가능한 <a> 태그로 만든다."""
+    if not config.CAFE_LINKS_AS_ANCHOR:
+        return html.escape(line)
     out, last = [], 0
     for m in URL_RE.finditer(line):
         out.append(html.escape(line[last:m.start()]))

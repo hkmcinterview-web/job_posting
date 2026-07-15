@@ -49,6 +49,9 @@ ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 BRAND_NAME = os.getenv("BRAND_NAME", "공대생현직자 잡앤유")
 POST_HEADER = os.getenv("POST_HEADER", "")   # 카페 글 상단에 붙는 문구 (HTML 허용)
 POST_FOOTER = os.getenv("POST_FOOTER", "")   # 카페 글 하단에 붙는 문구 (HTML 허용)
+# 카페 글에서 링크를 클릭 가능한 <a> 태그로 넣을지(1) 순수 텍스트로 넣을지(0).
+# 네이버 카페 API가 링크 태그가 많은 글을 스팸으로 보고 999로 막는 경우가 있어 기본 0.
+CAFE_LINKS_AS_ANCHOR = os.getenv("CAFE_LINKS_AS_ANCHOR", "0") == "1"
 MAX_LINKS = int(os.getenv("MAX_LINKS", "5"))              # 메시지당 처리할 최대 링크 수
 MAX_CARDS_PER_LINK = int(os.getenv("MAX_CARDS_PER_LINK", "3"))  # 링크당 카드뉴스 장수(1~3)
 SEND_CARDS_TO_TELEGRAM = os.getenv("SEND_CARDS_TO_TELEGRAM", "1") == "1"
