@@ -59,7 +59,10 @@ HELP_TEXT = (
     "  채용\n"
     "  https://recruit...\n"
     "  ▸ 링크가 안 읽히면: 공고 내용을 복사해 '채용' 뒤에 붙이거나,\n"
-    "  ▸ 공고 화면을 캡처해서 '채용' 캡션과 함께 사진으로 보내세요 (여러 장 가능)"
+    "  ▸ 공고 화면을 캡처해서 '채용' 캡션과 함께 사진으로 보내세요 (여러 장 가능)\n\n"
+    "🔗 단축주소 펼치기:\n"
+    "  첫 줄에 '펼치기' 라고 쓰고, 단축주소(buly.kr 등)가 든 글을 넣으면\n"
+    "  원본 주소로 펼친 전체 글을 그대로 돌려드립니다."
 )
 
 # 링크당 카드 선택 후보 개수 (2~3)
@@ -99,6 +102,24 @@ def handle_cafe(tg: TelegramClient, chat_id: int, content: str):
     result = post_article(subject, content_html, image_paths=None)
     url = result.get("articleUrl") or "(URL 확인 불가)"
     tg.send_message(chat_id, f"✅ 카페 게시 완료!\n제목: {subject}\n{url}")
+
+
+# ── 단축주소 펼쳐서 되돌려주기 ────────────────────────────
+
+def handle_expand(tg: TelegramClient, chat_id: int, content: str):
+    """받은 글 속 단축주소를 원본 주소로 펼쳐서, 편집한 전체 글을 그대로 돌려준다."""
+    if not content.strip():
+        tg.send_message(chat_id, "⚠️ '펼치기' 아래에 단축주소가 든 글을 함께 보내주세요.")
+        return
+    tg.send_message(chat_id, "⏳ 단축주소를 펼치는 중...")
+    try:
+        expanded = expand_short_links(content)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 펼치기 실패: {e}")
+        return
+    if expanded == content:
+        tg.send_message(chat_id, "ℹ️ 펼칠 단축주소를 찾지 못했어요 (이미 원본 주소이거나 지원 안 하는 도메인).")
+    tg.send_message(chat_id, expanded)
 
 
 # ── 채용공고 카드 + 카페 게시 ─────────────────────────────
@@ -379,6 +400,8 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_card(tg, chat_id, content)
     elif mode == "job":
         handle_job(tg, chat_id, content)
+    elif mode == "expand":
+        handle_expand(tg, chat_id, content)
     else:
         tg.send_message(chat_id, HELP_TEXT)
 
