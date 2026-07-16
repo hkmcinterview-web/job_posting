@@ -41,10 +41,23 @@ def _build_prompt(article: dict, n_options: int) -> str:
         f"같은 카드에 쓸 서로 다른 톤/문구의 헤드라인 후보를 정확히 {n_options}개 제안해 주세요.\n"
         "(순차적인 여러 포인트가 아니라, 같은 기사 내용을 표현하는 서로 다른 버전입니다)\n"
         "추가로, 카드뉴스와 함께 SNS(인스타그램 등)에 올릴 때 쓸 기사 요약문도 하나 만들어 주세요.\n\n"
-        "요약문(SUMMARY) 규칙:\n"
-        "- 3~5문장, 존댓말/신문투 없이 자연스러운 소셜미디어 캡션 톤\n"
+        "이 카드뉴스는 자동차산업 취업준비생 대상 인스타그램 캐러셀(5장)입니다.\n"
+        "1장은 헤드라인, 2장 요약, 3장 취준생 인사이트, 4장 면접 활용, 5장 CTA 이며\n"
+        "아래에서 SUMMARY(2장), INSIGHT(3장), INTERVIEW(4장), CAPTION(게시글 캡션)을 함께 만듭니다.\n\n"
+        "요약문(SUMMARY, 2장 슬라이드용) 규칙:\n"
+        "- 3~4문장, 존댓말/신문투 없이 간결하게. 한 문장에 한 줄씩 (줄바꿈으로 구분)\n"
         "- 기사의 핵심 사실을 과장·왜곡 없이 담기 (숫자·날짜 등 구체적 정보 유지)\n"
         "- 해시태그나 이모지는 넣지 말 것 (텍스트만)\n\n"
+        "인사이트(INSIGHT, 3장 슬라이드용) 규칙:\n"
+        "- 이 뉴스가 자동차산업 취준생/채용에 갖는 의미 2~3개, 각 줄 '- ' 로 시작\n"
+        "- 각 18~45자. 예: '- 전동화 설계·배터리 직무 수요가 늘어날 신호'\n"
+        "- 뻔한 얘기 말고 기사 내용에 근거한 구체적 시사점만\n\n"
+        "면접 활용(INTERVIEW, 4장 슬라이드용) 규칙:\n"
+        "- Q: 이 뉴스에서 나올 법한 예상 면접 질문 1개 (20~45자)\n"
+        "- A: 답변 포인트 2개, 각 줄 '- ' 로 시작 (각 18~45자)\n\n"
+        "캡션(CAPTION, 인스타 게시글 본문용) 규칙:\n"
+        "- 1~2문장 핵심 요약 + 취준생 관점 시사점 1문장\n"
+        "- 마지막 줄에 검색용 해시태그 6~8개 (예: #자동차산업 #현대차 #취준 ...)\n\n"
         "내용 규칙:\n"
         "- ⚠️ 기사 제목을 그대로 베끼지 말 것! 본문 내용을 파악해서 새로 쓴 센스있는 문장이어야 함\n"
         "- HEADLINE 은 2~3줄, 각 줄 8~14자, 줄바꿈 위치는 의미 단위로 자연스럽게\n"
@@ -59,11 +72,24 @@ def _build_prompt(article: dict, n_options: int) -> str:
         "- HIGHLIGHT: HEADLINE 여러 줄 중 가장 강조하고 싶은 '한 줄'을 그대로 복사 (HEADLINE 안의 한 줄과 정확히 일치)\n"
         "- STYLE: marker(형광펜 — 강렬한 이슈/속보) 또는 color(포인트 컬러 — 차분한 정보성) 중 하나\n\n"
         "출력 형식 — 아래 형식을 정확히 지켜서, 다른 설명/인사말 없이 작성하세요.\n"
-        "먼저 SUMMARY 블록을 한 번 쓰고, 그 다음 CARD 블록을 후보 수만큼 반복하세요.\n"
+        "SUMMARY → INSIGHT → INTERVIEW → CAPTION 블록을 한 번씩 쓰고, 그 다음 CARD 블록을 후보 수만큼 반복하세요.\n"
         "각 CARD 블록은 반드시 TAG → HIGHLIGHT → STYLE → HEADLINE 순서이고, HEADLINE 은 항상 블록의 마지막이며\n"
         "<<<END>>> 바로 앞까지 나오는 모든 줄이 헤드라인 내용입니다 (따옴표 등 어떤 문장부호를 써도 됩니다):\n\n"
         "<<<SUMMARY>>>\n"
-        "(3~5문장 요약)\n"
+        "(3~4문장, 한 문장에 한 줄)\n"
+        "<<<END>>>\n\n"
+        "<<<INSIGHT>>>\n"
+        "- (시사점 1)\n"
+        "- (시사점 2)\n"
+        "<<<END>>>\n\n"
+        "<<<INTERVIEW>>>\n"
+        "Q: (예상 면접 질문)\n"
+        "- (답변 포인트 1)\n"
+        "- (답변 포인트 2)\n"
+        "<<<END>>>\n\n"
+        "<<<CAPTION>>>\n"
+        "(캡션 본문)\n"
+        "#해시태그 #들\n"
         "<<<END>>>\n\n"
         "<<<CARD>>>\n"
         "TAG: (태그)\n"
@@ -95,6 +121,38 @@ def _extract_summary(text: str) -> str:
     """모델 응답에서 <<<SUMMARY>>>...<<<END>>> 블록을 뽑아 요약 텍스트로 반환."""
     m = _SUMMARY_BLOCK_RE.search(text or "")
     return m.group(1).strip() if m else ""
+
+
+def _extract_block(text: str, name: str) -> str:
+    m = re.search(rf"<{{2,3}}\s*{name}\s*>{{2,3}}(.*?)<{{2,3}}\s*END\s*>{{2,3}}",
+                  text or "", re.DOTALL | re.IGNORECASE)
+    return m.group(1).strip() if m else ""
+
+
+def _extract_extras(text: str) -> dict:
+    """캐러셀 2~4장 + 캡션 재료: summary / insight(list) / interview(dict) / caption."""
+    insight = [ln.lstrip("-•· ").strip()
+               for ln in _extract_block(text, "INSIGHT").split("\n")
+               if ln.strip().lstrip("-•· ").strip()]
+
+    interview = {"q": "", "points": []}
+    for ln in _extract_block(text, "INTERVIEW").split("\n"):
+        ln = ln.strip()
+        if not ln:
+            continue
+        if re.match(r"^Q\s*[:.]", ln, re.IGNORECASE):
+            interview["q"] = re.sub(r"^Q\s*[:.]\s*", "", ln, flags=re.IGNORECASE).strip()
+        else:
+            p = re.sub(r"^A\s*[:.]\s*", "", ln, flags=re.IGNORECASE).lstrip("-•· ").strip()
+            if p:
+                interview["points"].append(p)
+
+    return {
+        "summary": _extract_summary(text),
+        "insight": insight[:3],
+        "interview": interview if interview["q"] else {},
+        "caption": _extract_block(text, "CAPTION"),
+    }
 
 
 def _extract_cards(text: str) -> list:
@@ -138,7 +196,8 @@ def _extract_cards(text: str) -> list:
 def build_card_options(article: dict, n_options: int = 3):
     """카드 1장에 쓸 헤드라인 후보 + 기사 요약문을 만든다.
 
-    returns (options, engine, error, summary)
+    returns (options, engine, error, extras)
+    extras = {'summary','insight','interview','caption'} — 캐러셀 2~4장 + 인스타 캡션 재료.
     engine ∈ {'gemini','claude','heuristic'}, error 는 AI 실패 사유(없으면 "").
     AI 를 못 쓰면 후보 1개(제목 기반)만 돌려준다 — 이 경우 호출 측에서 선택 없이 바로 사용하면 된다."""
     n_options = max(2, min(3, n_options))
@@ -147,9 +206,9 @@ def build_card_options(article: dict, n_options: int = 3):
 
     if config.GEMINI_API_KEY:
         try:
-            summary, options = _build_cards_gemini(prompt)
+            extras, options = _build_cards_gemini(prompt)
             if options:
-                return options[:n_options], "gemini", "", summary
+                return options[:n_options], "gemini", "", extras
             error = "Gemini 응답에 후보가 없음"
         except Exception as e:
             error = f"Gemini: {e}"
@@ -157,15 +216,17 @@ def build_card_options(article: dict, n_options: int = 3):
 
     if config.ANTHROPIC_API_KEY:
         try:
-            summary, options = _build_cards_claude(prompt)
+            extras, options = _build_cards_claude(prompt)
             if options:
-                return options[:n_options], "claude", "", summary
+                return options[:n_options], "claude", "", extras
             error = error or "Claude 응답에 후보가 없음"
         except Exception as e:
             error = f"Claude: {e}"
             print(f"[summarize] Claude 요약 실패, 휴리스틱으로 대체: {e}")
 
-    return _build_cards_heuristic(article), "heuristic", error, _heuristic_summary(article)
+    heuristic_extras = {"summary": _heuristic_summary(article), "insight": [],
+                        "interview": {}, "caption": ""}
+    return _build_cards_heuristic(article), "heuristic", error, heuristic_extras
 
 
 # ── ① 구글 Gemini (무료 등급) ────────────────────────────
@@ -217,7 +278,7 @@ def _gemini_generate(prompt: str, temperature: float = 0.9, images=None) -> str:
 
 def _build_cards_gemini(prompt: str):
     text = _gemini_generate(prompt)
-    return _extract_summary(text), _extract_cards(text)
+    return _extract_extras(text), _extract_cards(text)
 
 
 # ── ② Claude API (유료) ──────────────────────────────────
@@ -243,7 +304,7 @@ def _claude_generate(prompt: str, images=None) -> str:
 
 def _build_cards_claude(prompt: str):
     text = _claude_generate(prompt)
-    return _extract_summary(text), _extract_cards(text)
+    return _extract_extras(text), _extract_cards(text)
 
 
 # ── 공용: 다른 기능(채용공고 등)에서도 같은 AI 폴백 체인을 쓰도록 공개 ──

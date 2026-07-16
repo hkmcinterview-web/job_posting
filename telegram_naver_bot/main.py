@@ -26,7 +26,7 @@ import traceback
 
 import config
 from article import fetch_article, fetch_job_page
-from card_news import render_cards
+from card_news import render_carousel, render_cards
 from editor import build_cafe_post, build_job_post
 from job_card import render_job_card
 from job_summary import build_job_data
@@ -70,7 +70,7 @@ N_OPTIONS = max(2, min(3, config.MAX_CARDS_PER_LINK or 3))
 
 # chat_id 별로 "카드 후보 선택 대기" 상태를 들고 있음 (봇 재시작 시 초기화됨)
 # {chat_id: {"queue": [url, ...], "link_idx": int, "made": int, "stamp": int,
-#            "article": dict|None, "options": list|None, "summary": str|None}}
+#            "article": dict|None, "options": list|None, "extras": dict|None}}
 PENDING_CARD: dict = {}
 
 
@@ -283,14 +283,18 @@ def _format_options(options: list) -> str:
     return "\n".join(lines)
 
 
-def _send_summary_text(tg: TelegramClient, chat_id: int, art: dict, summary: str):
-    """카드뉴스 업로드 시 캡션으로 바로 쓸 수 있게, 제목 + 요약 + 출처 링크를 별도 메시지로 전송."""
+def _send_caption_text(tg: TelegramClient, chat_id: int, art: dict, extras: dict):
+    """인스타 업로드 시 바로 붙여넣을 캡션(+제목/출처)을 별도 메시지로 전송."""
+    extras = extras or {}
     parts = []
     title = art.get("title") or ""
     if title:
         parts.append(f"📰 {title}")
-    if summary:
-        parts.append(f"📝 요약\n{summary}")
+    caption = (extras.get("caption") or "").strip()
+    if caption:
+        parts.append(f"📋 인스타 캡션 (복사해서 사용)\n{caption}")
+    elif (extras.get("summary") or "").strip():
+        parts.append(f"📝 요약\n{extras['summary']}")
     url = art.get("url", "")
     if url:
         parts.append(f"\n출처: {url}")
@@ -299,13 +303,14 @@ def _send_summary_text(tg: TelegramClient, chat_id: int, art: dict, summary: str
 
 
 def _finish_link(tg: TelegramClient, chat_id: int, card: dict, art: dict, state: dict):
-    """선택(또는 자동 확정)된 카드 1장을 렌더링해서 보내고 다음 링크로 진행."""
+    """선택(또는 자동 확정)된 헤드라인으로 캐러셀(1~4장)을 렌더링해서 보내고 다음 링크로 진행."""
     try:
-        paths = render_cards([card], art, f"{state['stamp']}_{state['link_idx']}")
-        for p in paths:
-            tg.send_photo(chat_id, p, caption=art.get("title", "")[:80])
+        paths = render_carousel(card, art, state.get("extras") or {},
+                                f"{state['stamp']}_{state['link_idx']}")
+        for i, p in enumerate(paths, 1):
+            tg.send_photo(chat_id, p, caption=f"{i}/{len(paths)}장" if len(paths) > 1 else "")
         state["made"] += len(paths)
-        _send_summary_text(tg, chat_id, art, state.get("summary") or "")
+        _send_caption_text(tg, chat_id, art, state.get("extras") or {})
     except Exception as e:
         tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 카드뉴스 생성 실패: {e}")
     _advance(tg, chat_id)
@@ -318,7 +323,7 @@ def _advance(tg: TelegramClient, chat_id: int):
         return
     state["article"] = None
     state["options"] = None
-    state["summary"] = None
+    state["extras"] = None
 
     if not state["queue"]:
         tg.send_message(chat_id, f"✅ 카드뉴스 {state['made']}장 완성!")
@@ -335,13 +340,13 @@ def _advance(tg: TelegramClient, chat_id: int):
         return
 
     try:
-        options, engine, err, summary = build_card_options(art, N_OPTIONS)
+        options, engine, err, extras = build_card_options(art, N_OPTIONS)
     except Exception as e:
         tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 요약 실패: {e}")
         _advance(tg, chat_id)
         return
 
-    state["summary"] = summary
+    state["extras"] = extras
 
     if len(options) <= 1:
         # AI 를 못 썼거나 실패 — 고를 필요 없이 바로 그 하나로 카드 생성
@@ -369,7 +374,7 @@ def handle_card(tg: TelegramClient, chat_id: int, content: str):
         "stamp": int(time.time()),
         "article": None,
         "options": None,
-        "summary": None,
+        "extras": None,
     }
     tg.send_message(chat_id, f"⏳ 카드뉴스 준비 중 — 링크 {len(links)}개")
     _advance(tg, chat_id)

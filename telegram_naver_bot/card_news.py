@@ -278,14 +278,18 @@ def _draw_card(card, background: Image.Image, source: str,
             draw.text((MARGIN, y), line, font=headline_font, fill=WHITE)
         y += line_gap
 
-    # ── 하단: 출처(좌) · 유튜브로고+브랜드(중앙) ──
-    # anchor 로 세로 중앙(middle) 정렬해 로고와 글자 높이를 맞춘다
+    _draw_footer(draw, source, footer_cy)
+
+    return img
+
+
+def _draw_footer(draw: ImageDraw.ImageDraw, source: str, footer_cy: int):
+    """하단 공통 footer — 출처(좌) · 유튜브로고+브랜드(중앙). 모든 장에서 재사용."""
     src_font = _font(False, 24)
     if source:
         draw.text((MARGIN, footer_cy), f"@{source}"[:20], font=src_font,
                   fill=SUBTEXT, anchor="lm")
 
-    # 유튜브 로고 + 브랜드명 (하단 중앙, 세로 중앙 정렬) — 주아체
     brand = config.BRAND_NAME
     brand_font = _brand_font(32)   # 주아체는 같은 pt 에서 조금 작아 살짝 키움
     icon_h = 26
@@ -297,8 +301,6 @@ def _draw_card(card, background: Image.Image, source: str,
     _draw_youtube(draw, sx, footer_cy - icon_h / 2, icon_w, icon_h)
     draw.text((sx + icon_w + gap, footer_cy), brand, font=brand_font,
               fill=WHITE, anchor="lm")
-
-    return img
 
 
 def _draw_tag(draw: ImageDraw.ImageDraw, x, y, text: str):
@@ -319,6 +321,131 @@ def _draw_youtube(draw: ImageDraw.ImageDraw, x, y, w, h):
         (x + w * 0.64, y + h * 0.50),
     ]
     draw.polygon(tri, fill=(255, 255, 255))
+
+
+# ── 캐러셀 2~4장 (요약 / 취준생 인사이트 / 면접 활용) ──────────
+
+CAROUSEL_TOTAL = 5   # 인스타 캐러셀 총 장수 (5장 = 1후킹 + 2요약 + 3인사이트 + 4면접 + 5CTA)
+
+
+def _content_bg(background: Image.Image) -> Image.Image:
+    """2~4장 배경 — 1장과 같은 사진을 강하게 블러 + 전체적으로 어둡게."""
+    img = background.copy() if background is not None else Image.new("RGB", (W, H), FALLBACK_BG)
+    if img.size != (W, H):
+        img = img.resize((W, H), Image.LANCZOS)
+    if background is not None:
+        img = img.filter(ImageFilter.GaussianBlur(18))
+        img = Image.blend(img, Image.new("RGB", (W, H), (0, 0, 0)), 0.66)
+    return img
+
+
+def _slide_frame(background, page: int, label: str, title: str, source: str):
+    """콘텐츠 장 공통 틀: 배경 + 페이지표시 + 라벨 칩 + 큰 제목 + footer.
+    returns (img, draw, 본문 시작 y)"""
+    img = _content_bg(background)
+    draw = ImageDraw.Draw(img)
+
+    # 우상단 페이지 표시
+    draw.text((W - MARGIN, 78), f"{page}/{CAROUSEL_TOTAL}", font=_font(False, 30),
+              fill=SUBTEXT, anchor="ra")
+
+    # 라벨 칩 (빨간 알약) + 큰 제목
+    f_chip = _brand_font(32)
+    tw = draw.textlength(label, font=f_chip)
+    padx, ch = 26, 56
+    draw.rounded_rectangle([MARGIN, 140, MARGIN + tw + padx * 2, 140 + ch],
+                           radius=ch // 2, fill=ACCENT)
+    draw.text((MARGIN + padx, 140 + ch / 2), label, font=f_chip, fill=WHITE, anchor="lm")
+
+    tf = _font(True, 58)
+    draw.text((MARGIN, 236), title, font=tf, fill=WHITE)
+
+    _draw_footer(draw, source, H - 74)
+    return img, draw, 356
+
+
+def _draw_wrapped(draw, x, y, text, font, max_width, gap, fill=WHITE, max_lines=14):
+    for line in _wrap(draw, text, font, max_width)[:max_lines]:
+        draw.text((x, y), line, font=font, fill=fill)
+        y += gap
+    return y
+
+
+def _slide_summary(background, summary: str, page: int, source: str) -> Image.Image:
+    img, draw, y = _slide_frame(background, page, "핵심 요약", "한눈에 보는 핵심", source)
+    f = _font(True, 42)
+    for para in [p.strip() for p in (summary or "").split("\n") if p.strip()]:
+        y = _draw_wrapped(draw, MARGIN, y, para, f, W - MARGIN * 2, 62)
+        y += 26
+        if y > H - 220:
+            break
+    return img
+
+
+def _slide_bullets(background, items: list, page: int, source: str,
+                   label: str, title: str) -> Image.Image:
+    img, draw, y = _slide_frame(background, page, label, title, source)
+    f = _font(True, 42)
+    num_f = _font(True, 34)
+    for i, item in enumerate(items[:4], 1):
+        if y > H - 230:
+            break
+        r = 24
+        draw.ellipse([MARGIN, y + 6, MARGIN + r * 2, y + 6 + r * 2], fill=HILITE)
+        draw.text((MARGIN + r, y + 6 + r), str(i), font=num_f, fill=DARK, anchor="mm")
+        y = _draw_wrapped(draw, MARGIN + r * 2 + 22, y, item.lstrip("-• ").strip(),
+                          f, W - MARGIN * 2 - r * 2 - 22, 60)
+        y += 34
+    return img
+
+
+def _slide_interview(background, interview: dict, page: int, source: str) -> Image.Image:
+    img, draw, y = _slide_frame(background, page, "면접 활용", "면접에서 이렇게 써먹자", source)
+    q = (interview.get("q") or "").strip()
+    points = interview.get("points") or []
+
+    qf = _font(True, 46)
+    draw.text((MARGIN, y), "Q.", font=_font(True, 52), fill=HILITE)
+    y = _draw_wrapped(draw, MARGIN + 78, y, q, qf, W - MARGIN * 2 - 78, 64, fill=HILITE)
+    y += 44
+
+    draw.text((MARGIN, y), "A.", font=_font(True, 52), fill=WHITE)
+    af = _font(True, 42)
+    ay = y
+    for p in points[:3]:
+        if ay > H - 220:
+            break
+        ay = _draw_wrapped(draw, MARGIN + 78, ay, "· " + p.lstrip("-• ").strip(),
+                           af, W - MARGIN * 2 - 78, 60)
+        ay += 22
+    return img
+
+
+def render_carousel(card: dict, article: dict, extras: dict, out_prefix: str) -> list:
+    """캐러셀 1~4장 렌더링. 1장은 후킹(기존 스타일), 2~4장은 같은 사진의
+    블러+어둡게 배경 위에 요약/인사이트/면접활용. AI 데이터가 없는 장은 건너뜀."""
+    config.CARDS_DIR.mkdir(parents=True, exist_ok=True)
+    extras = extras or {}
+    background = load_backgrounds(article, 1)[0]
+    source = (article or {}).get("source") or (article or {}).get("site", "")
+
+    slides = [_draw_card(card, background, source, 0, 1)]   # 1장 — 후킹
+
+    if (extras.get("summary") or "").strip():
+        slides.append(_slide_summary(background, extras["summary"], len(slides) + 1, source))
+    if extras.get("insight"):
+        slides.append(_slide_bullets(background, extras["insight"], len(slides) + 1,
+                                     source, "취준생 인사이트", "그래서 취준생에게는?"))
+    iv = extras.get("interview") or {}
+    if iv.get("q"):
+        slides.append(_slide_interview(background, iv, len(slides) + 1, source))
+
+    paths = []
+    for i, img in enumerate(slides, 1):
+        path = config.CARDS_DIR / f"{out_prefix}_{i}.png"
+        img.save(path, "PNG")
+        paths.append(path)
+    return paths
 
 
 def render_cards(cards: list, article: dict, out_prefix: str) -> list:
