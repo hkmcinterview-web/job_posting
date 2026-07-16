@@ -452,11 +452,16 @@ def _slide_bullets(background, items: list, page: int, source: str,
             break
         _draw_panel(img, [MARGIN, y, W - MARGIN, y + ph])
         draw = ImageDraw.Draw(img)
+        # 번호 뱃지를 텍스트 '첫 줄'의 실제 글자 세로 중심에 맞춘다
+        first_line = _wrap(draw, text, f, inner_w)[0]
+        tx = MARGIN + pad + 76
+        bbox = draw.textbbox((tx, y + pad), first_line, font=f)
+        line_cy = (bbox[1] + bbox[3]) / 2
         r = 26
-        bcy = y + pad + gap / 2 - 6
-        draw.ellipse([MARGIN + pad, bcy - r, MARGIN + pad + r * 2, bcy + r], fill=HILITE)
-        draw.text((MARGIN + pad + r, bcy), str(i), font=_font(True, 32), fill=DARK, anchor="mm")
-        _draw_rich_wrapped(draw, MARGIN + pad + 76, y + pad, text, f, inner_w, gap)
+        draw.ellipse([MARGIN + pad, line_cy - r, MARGIN + pad + r * 2, line_cy + r], fill=HILITE)
+        draw.text((MARGIN + pad + r, line_cy), str(i), font=_font(True, 32),
+                  fill=DARK, anchor="mm")
+        _draw_rich_wrapped(draw, tx, y + pad, text, f, inner_w, gap)
         y += ph + 26
     return img.convert("RGB")
 

@@ -62,8 +62,8 @@ def main():
     draw.text((W / 2, cy), "유튜브에서 현직자의 더 깊은 이야기를 만나요", font=_font(False, 32),
               fill=SUBTEXT, anchor="mm")
 
-    # 하단 공유 유도 (폰트에 이모지 글리프가 없어 텍스트로만)
-    draw.text((W / 2, H - 150), "저장해두고, 취준 친구에게 공유해주세요!",
+    # 하단 저장 유도 (폰트에 이모지 글리프가 없어 텍스트로만)
+    draw.text((W / 2, H - 150), "저장해두고, 자소서·면접 준비할 때 꺼내봐요!",
               font=_font(True, 36), fill=HILITE, anchor="mm")
 
     path = config.CARDS_DIR / "cta_follow.png"
