@@ -42,19 +42,21 @@ def _build_prompt(article: dict, n_options: int) -> str:
         "(순차적인 여러 포인트가 아니라, 같은 기사 내용을 표현하는 서로 다른 버전입니다)\n"
         "추가로, 카드뉴스와 함께 SNS(인스타그램 등)에 올릴 때 쓸 기사 요약문도 하나 만들어 주세요.\n\n"
         "이 카드뉴스는 자동차산업 취업준비생 대상 인스타그램 캐러셀(5장)입니다.\n"
-        "1장은 헤드라인, 2장 요약, 3장 취준생 인사이트, 4장 면접 활용, 5장 CTA 이며\n"
-        "아래에서 SUMMARY(2장), INSIGHT(3장), INTERVIEW(4장), CAPTION(게시글 캡션)을 함께 만듭니다.\n\n"
+        "1장은 헤드라인, 2장 핵심 요약, 3장 배경/맥락, 4장 전망, 5장 CTA 이며\n"
+        "아래에서 SUMMARY(2장), CONTEXT(3장), OUTLOOK(4장), CAPTION(게시글 캡션)을 함께 만듭니다.\n\n"
         "요약문(SUMMARY, 2장 슬라이드용) 규칙:\n"
-        "- 3~4문장, 존댓말/신문투 없이 간결하게. 한 문장에 한 줄씩 (줄바꿈으로 구분)\n"
-        "- 기사의 핵심 사실을 과장·왜곡 없이 담기 (숫자·날짜 등 구체적 정보 유지)\n"
+        "- 4~6문장으로 기사 핵심을 충분히 자세하게 (이 내용이 슬라이드에 그대로 실림)\n"
+        "- 한 문장에 한 줄씩 (줄바꿈으로 구분), 숫자·날짜·회사명 등 구체적 정보 유지\n"
         "- 해시태그나 이모지는 넣지 말 것 (텍스트만)\n\n"
-        "인사이트(INSIGHT, 3장 슬라이드용) 규칙:\n"
-        "- 이 뉴스가 자동차산업 취준생/채용에 갖는 의미 2~3개, 각 줄 '- ' 로 시작\n"
-        "- 각 18~45자. 예: '- 전동화 설계·배터리 직무 수요가 늘어날 신호'\n"
-        "- 뻔한 얘기 말고 기사 내용에 근거한 구체적 시사점만\n\n"
-        "면접 활용(INTERVIEW, 4장 슬라이드용) 규칙:\n"
-        "- Q: 이 뉴스에서 나올 법한 예상 면접 질문 1개 (20~45자)\n"
-        "- A: 답변 포인트 2개, 각 줄 '- ' 로 시작 (각 18~45자)\n\n"
+        "배경(CONTEXT, 3장 슬라이드용) 규칙:\n"
+        "- 이 뉴스가 왜 나왔는지 배경과 맥락을 친구에게 설명하듯 자연스러운 말투로 2~4문장\n"
+        "- 딱딱 끊어지는 개조식 금지 — 자연스럽게 이어지는 하나의 이야기 문단으로\n"
+        "- 예: '사실 이 갈등은 어제오늘 일이 아니에요. 작년 임금협상 때부터 ...'\n"
+        "- 기사에 없는 내용을 지어내지 말고, 업계 일반 상식 수준의 맥락만 보태기\n\n"
+        "전망(OUTLOOK, 4장 슬라이드용) 규칙:\n"
+        "- 앞으로 지켜볼 포인트 2~3개, 각 줄 '- ' 로 시작 (각 18~45자)\n"
+        "- 마지막 1개는 취준생 관점으로 자연스럽게 (예: '- 취준생이라면 전동화 직무 채용 흐름에 주목')\n"
+        "- 억지로 취업과 연결하지 말 것 — 기사 흐름에서 자연스럽게 나오는 것만\n\n"
         "캡션(CAPTION, 인스타 게시글 본문용) 규칙:\n"
         "- 1~2문장 핵심 요약 + 취준생 관점 시사점 1문장\n"
         "- 마지막 줄에 검색용 해시태그 6~8개 (예: #자동차산업 #현대차 #취준 ...)\n\n"
@@ -72,20 +74,19 @@ def _build_prompt(article: dict, n_options: int) -> str:
         "- HIGHLIGHT: HEADLINE 여러 줄 중 가장 강조하고 싶은 '한 줄'을 그대로 복사 (HEADLINE 안의 한 줄과 정확히 일치)\n"
         "- STYLE: marker(형광펜 — 강렬한 이슈/속보) 또는 color(포인트 컬러 — 차분한 정보성) 중 하나\n\n"
         "출력 형식 — 아래 형식을 정확히 지켜서, 다른 설명/인사말 없이 작성하세요.\n"
-        "SUMMARY → INSIGHT → INTERVIEW → CAPTION 블록을 한 번씩 쓰고, 그 다음 CARD 블록을 후보 수만큼 반복하세요.\n"
+        "SUMMARY → CONTEXT → OUTLOOK → CAPTION 블록을 한 번씩 쓰고, 그 다음 CARD 블록을 후보 수만큼 반복하세요.\n"
         "각 CARD 블록은 반드시 TAG → HIGHLIGHT → STYLE → HEADLINE 순서이고, HEADLINE 은 항상 블록의 마지막이며\n"
         "<<<END>>> 바로 앞까지 나오는 모든 줄이 헤드라인 내용입니다 (따옴표 등 어떤 문장부호를 써도 됩니다):\n\n"
         "<<<SUMMARY>>>\n"
-        "(3~4문장, 한 문장에 한 줄)\n"
+        "(4~6문장, 한 문장에 한 줄)\n"
         "<<<END>>>\n\n"
-        "<<<INSIGHT>>>\n"
-        "- (시사점 1)\n"
-        "- (시사점 2)\n"
+        "<<<CONTEXT>>>\n"
+        "(자연스럽게 이어지는 배경 설명 문단)\n"
         "<<<END>>>\n\n"
-        "<<<INTERVIEW>>>\n"
-        "Q: (예상 면접 질문)\n"
-        "- (답변 포인트 1)\n"
-        "- (답변 포인트 2)\n"
+        "<<<OUTLOOK>>>\n"
+        "- (지켜볼 포인트 1)\n"
+        "- (지켜볼 포인트 2)\n"
+        "- (취준생 관점 포인트)\n"
         "<<<END>>>\n\n"
         "<<<CAPTION>>>\n"
         "(캡션 본문)\n"
@@ -130,27 +131,19 @@ def _extract_block(text: str, name: str) -> str:
 
 
 def _extract_extras(text: str) -> dict:
-    """캐러셀 2~4장 + 캡션 재료: summary / insight(list) / interview(dict) / caption."""
-    insight = [ln.lstrip("-•· ").strip()
-               for ln in _extract_block(text, "INSIGHT").split("\n")
+    """캐러셀 2~4장 + 캡션 재료: summary / context(문단) / outlook(list) / caption."""
+    outlook = [ln.lstrip("-•· ").strip()
+               for ln in _extract_block(text, "OUTLOOK").split("\n")
                if ln.strip().lstrip("-•· ").strip()]
 
-    interview = {"q": "", "points": []}
-    for ln in _extract_block(text, "INTERVIEW").split("\n"):
-        ln = ln.strip()
-        if not ln:
-            continue
-        if re.match(r"^Q\s*[:.]", ln, re.IGNORECASE):
-            interview["q"] = re.sub(r"^Q\s*[:.]\s*", "", ln, flags=re.IGNORECASE).strip()
-        else:
-            p = re.sub(r"^A\s*[:.]\s*", "", ln, flags=re.IGNORECASE).lstrip("-•· ").strip()
-            if p:
-                interview["points"].append(p)
+    # 배경 문단 — 줄바꿈이 섞여 와도 하나의 흐르는 문단으로 합침
+    context = " ".join(ln.strip() for ln in _extract_block(text, "CONTEXT").split("\n")
+                       if ln.strip())
 
     return {
         "summary": _extract_summary(text),
-        "insight": insight[:3],
-        "interview": interview if interview["q"] else {},
+        "context": context,
+        "outlook": outlook[:3],
         "caption": _extract_block(text, "CAPTION"),
     }
 
@@ -224,8 +217,8 @@ def build_card_options(article: dict, n_options: int = 3):
             error = f"Claude: {e}"
             print(f"[summarize] Claude 요약 실패, 휴리스틱으로 대체: {e}")
 
-    heuristic_extras = {"summary": _heuristic_summary(article), "insight": [],
-                        "interview": {}, "caption": ""}
+    heuristic_extras = {"summary": _heuristic_summary(article), "context": "",
+                        "outlook": [], "caption": ""}
     return _build_cards_heuristic(article), "heuristic", error, heuristic_extras
 
 

@@ -404,30 +404,38 @@ def _slide_frame(background, page: int, label: str, title: str, source: str):
 
 
 def _slide_summary(background, summary: str, page: int, source: str) -> Image.Image:
-    """2장 — 요약 문장들을 하나의 유리 패널에 'ㆍ' 로 촘촘하게 묶는다."""
+    """2장 — 풀 요약을 하나의 유리 패널에 담는다. 글이 많으면 크기를 자동 축소."""
     img, draw, y = _slide_frame(background, page, "핵심 요약", "한눈에 보는 핵심", source)
-    f = _font(True, 40)
-    gap, item_gap, pad = 56, 20, 38
-    items = [p.strip().lstrip("-•· ") for p in (summary or "").split("\n") if p.strip()][:5]
-    inner_w = W - MARGIN * 2 - pad * 2 - 40
+    items = [p.strip().lstrip("-•· ") for p in (summary or "").split("\n") if p.strip()][:7]
+    pad, item_gap = 38, 18
+    limit = H - 160 - y
 
-    # 공간에 들어가는 문장까지만 채택한 뒤, 그 높이에 딱 맞게 패널을 그린다
+    # 전부 들어가는 가장 큰 글자 크기를 찾는다 (40 → 30)
+    for size in (40, 38, 36, 34, 32, 30):
+        f = _font(True, size)
+        gap = size + 15
+        inner_w = W - MARGIN * 2 - pad * 2 - size
+        heights = [len(_wrap(draw, it, f, inner_w)) * gap for it in items]
+        panel_h = pad * 2 + sum(heights) + (len(items) - 1) * item_gap - 12
+        if panel_h <= limit:
+            break
+
+    # 그래도 넘치면 들어가는 문장까지만
     fit, used_h = [], 0
-    for it in items:
-        h = len(_wrap(draw, it, f, inner_w)) * gap
+    for it, h in zip(items, heights):
         need = used_h + h + (item_gap if fit else 0)
-        if y + pad * 2 + need - 12 > H - 170:
+        if pad * 2 + need - 12 > limit:
             break
         fit.append((it, h))
         used_h = need
     panel_h = pad * 2 + used_h - 12
+
     _draw_panel(img, [MARGIN, y, W - MARGIN, y + panel_h])
     draw = ImageDraw.Draw(img)
-
     ty = y + pad
     for it, h in fit:
         draw.text((MARGIN + pad, ty), "ㆍ", font=f, fill=HILITE)
-        _draw_rich_wrapped(draw, MARGIN + pad + 40, ty, it, f, inner_w, gap)
+        _draw_rich_wrapped(draw, MARGIN + pad + size, ty, it, f, inner_w, gap)
         ty += h + item_gap
     return img.convert("RGB")
 
@@ -456,53 +464,30 @@ def _slide_bullets(background, items: list, page: int, source: str,
     return img.convert("RGB")
 
 
-def _slide_interview(background, interview: dict, page: int, source: str) -> Image.Image:
-    """4장 — 인용(따옴표) 스타일 질문 카드 + 체크마크 답변 + TIP."""
-    img, draw, y = _slide_frame(background, page, "면접 활용", "면접에서 이렇게 써먹자", source)
-    q = (interview.get("q") or "").strip()
-    points = interview.get("points") or []
+def _slide_context(background, context: str, page: int, source: str) -> Image.Image:
+    """3장 — 배경/맥락을 이야기하듯 흐르는 문단으로. 좌측 노란 바 + 큰따옴표."""
+    img, draw, y = _slide_frame(background, page, "배경 짚기", "왜 이런 일이?", source)
+    text = (context or "").strip()
 
-    # 질문 패널 — 좌측 노란 바 + 큰따옴표
-    qf = _font(True, 46)
-    pad, gap_q = 40, 64
-    inner_w = W - MARGIN * 2 - pad * 2
-    q_lines = _wrap(draw, q, qf, inner_w)[:3]
-    q_h = pad + 58 + len(q_lines) * gap_q + pad - 16
-    _draw_panel(img, [MARGIN, y, W - MARGIN, y + q_h])
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle([MARGIN, y, MARGIN + 9, y + q_h], radius=4, fill=HILITE)
-    draw.text((MARGIN + pad - 6, y + pad - 26), "“", font=_font(True, 110), fill=HILITE)
-    draw.text((W - MARGIN - pad, y + pad - 2), "예상 면접 질문", font=_font(False, 27),
-              fill=SUBTEXT, anchor="ra")
-    ty = y + pad + 58
-    for line in q_lines:
-        draw.text((MARGIN + pad, ty), line, font=qf, fill=WHITE)
-        ty += gap_q
-    y += q_h + 46
-
-    # 답변 포인트 — 체크마크
-    draw.text((MARGIN, y), "이렇게 답해보세요", font=_font(True, 34), fill=HILITE)
-    y += 66
-    af = _font(True, 40)
-    gap = 56
-    for p in points[:3]:
-        text = p.lstrip("-•· ").strip()
-        n = len(_wrap(draw, text, af, W - MARGIN * 2 - 64))
-        if y + n * gap > H - 230:
+    pad = 42
+    for size in (42, 40, 38, 36, 34):
+        f = _font(True, size)
+        gap = size + 22   # 이야기체는 줄간격을 여유있게
+        inner_w = W - MARGIN * 2 - pad * 2
+        lines = _wrap(draw, text, f, inner_w)
+        panel_h = pad + 64 + len(lines) * gap + pad - 14
+        if y + panel_h <= H - 160:
             break
-        _draw_check(draw, MARGIN, y + 6)
-        y = _draw_rich_wrapped(draw, MARGIN + 64, y, text, af, W - MARGIN * 2 - 64, gap)
-        y += 30
+    lines = lines[:14]
 
-    # TIP 뱃지
-    tf = _font(True, 28)
-    ty2 = H - 156
-    lw = draw.textlength("TIP", font=tf)
-    draw.rounded_rectangle([MARGIN, ty2, MARGIN + lw + 30, ty2 + 46], radius=10,
-                           outline=HILITE, width=2)
-    draw.text((MARGIN + 15, ty2 + 23), "TIP", font=tf, fill=HILITE, anchor="lm")
-    draw.text((MARGIN + lw + 30 + 18, ty2 + 23), "저장해두고 면접 전에 다시 보세요",
-              font=_font(False, 30), fill=SUBTEXT, anchor="lm")
+    _draw_panel(img, [MARGIN, y, W - MARGIN, y + panel_h])
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle([MARGIN, y, MARGIN + 9, y + panel_h], radius=4, fill=HILITE)
+    draw.text((MARGIN + pad - 6, y + pad - 28), "“", font=_font(True, 110), fill=HILITE)
+    ty = y + pad + 64
+    for line in lines:
+        _draw_line_rich(draw, MARGIN + pad, ty, line, f, WHITE)
+        ty += gap
     return img.convert("RGB")
 
 
@@ -518,12 +503,11 @@ def render_carousel(card: dict, article: dict, extras: dict, out_prefix: str) ->
 
     if (extras.get("summary") or "").strip():
         slides.append(_slide_summary(background, extras["summary"], len(slides) + 1, source))
-    if extras.get("insight"):
-        slides.append(_slide_bullets(background, extras["insight"], len(slides) + 1,
-                                     source, "취준생 인사이트", "그래서 취준생에게는?"))
-    iv = extras.get("interview") or {}
-    if iv.get("q"):
-        slides.append(_slide_interview(background, iv, len(slides) + 1, source))
+    if (extras.get("context") or "").strip():
+        slides.append(_slide_context(background, extras["context"], len(slides) + 1, source))
+    if extras.get("outlook"):
+        slides.append(_slide_bullets(background, extras["outlook"], len(slides) + 1,
+                                     source, "전망", "앞으로 지켜볼 포인트"))
 
     paths = []
     for i, img in enumerate(slides, 1):
