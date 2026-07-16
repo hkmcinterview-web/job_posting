@@ -179,13 +179,21 @@ def load_backgrounds(article: dict, count: int) -> list:
     return [good[min(i, len(good) - 1)] for i in range(count)]
 
 
+_NO_LINE_START = ",.!?%)]」』”’·~…"   # 줄 맨 앞에 오면 어색한 문장부호
+
+
 def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> list:
-    """이미 \\n 이 있으면 그대로 쓰고, 넘치는 줄만 글자 단위로 추가 줄바꿈."""
+    """이미 \\n 이 있으면 그대로 쓰고, 넘치는 줄만 글자 단위로 추가 줄바꿈.
+    문장부호가 줄 맨 앞에 오지 않도록 직전 줄에 붙인다."""
     lines = []
     for para in (text or "").split("\n"):
         cur = ""
         for ch in para:
             if cur and draw.textlength(cur + ch, font=font) > max_width:
+                if ch in _NO_LINE_START:   # 부호는 넘치더라도 이번 줄 끝에 붙이고 줄바꿈
+                    lines.append(cur + ch)
+                    cur = ""
+                    continue
                 lines.append(cur)
                 cur = ch.lstrip()
             else:
@@ -404,39 +412,28 @@ def _slide_frame(background, page: int, label: str, title: str, source: str):
 
 
 def _slide_summary(background, summary: str, page: int, source: str) -> Image.Image:
-    """2장 — 풀 요약을 하나의 유리 패널에 담는다. 글이 많으면 크기를 자동 축소."""
+    """2장 — 풀 요약을 이어지는 문단으로 하나의 유리 패널에 담는다 (크기 자동 축소)."""
     img, draw, y = _slide_frame(background, page, "핵심 요약", "한눈에 보는 핵심", source)
-    items = [p.strip().lstrip("-•· ") for p in (summary or "").split("\n") if p.strip()][:7]
-    pad, item_gap = 38, 18
-    limit = H - 160 - y
+    # 문장들을 끊지 않고 하나의 흐르는 문단으로 합침
+    text = " ".join(p.strip().lstrip("-•· ") for p in (summary or "").split("\n") if p.strip())
 
-    # 전부 들어가는 가장 큰 글자 크기를 찾는다 (40 → 30)
-    for size in (40, 38, 36, 34, 32, 30):
+    pad = 42
+    for size in (42, 40, 38, 36, 34, 32, 30):
         f = _font(True, size)
-        gap = size + 15
-        inner_w = W - MARGIN * 2 - pad * 2 - size
-        heights = [len(_wrap(draw, it, f, inner_w)) * gap for it in items]
-        panel_h = pad * 2 + sum(heights) + (len(items) - 1) * item_gap - 12
-        if panel_h <= limit:
+        gap = size + 20
+        inner_w = W - MARGIN * 2 - pad * 2
+        lines = _wrap(draw, text, f, inner_w)
+        panel_h = pad * 2 + len(lines) * gap - 10
+        if y + panel_h <= H - 160:
             break
-
-    # 그래도 넘치면 들어가는 문장까지만
-    fit, used_h = [], 0
-    for it, h in zip(items, heights):
-        need = used_h + h + (item_gap if fit else 0)
-        if pad * 2 + need - 12 > limit:
-            break
-        fit.append((it, h))
-        used_h = need
-    panel_h = pad * 2 + used_h - 12
+    lines = lines[:16]
 
     _draw_panel(img, [MARGIN, y, W - MARGIN, y + panel_h])
     draw = ImageDraw.Draw(img)
     ty = y + pad
-    for it, h in fit:
-        draw.text((MARGIN + pad, ty), "ㆍ", font=f, fill=HILITE)
-        _draw_rich_wrapped(draw, MARGIN + pad + size, ty, it, f, inner_w, gap)
-        ty += h + item_gap
+    for line in lines:
+        _draw_line_rich(draw, MARGIN + pad, ty, line, f, WHITE)
+        ty += gap
     return img.convert("RGB")
 
 
@@ -475,7 +472,7 @@ def _slide_context(background, context: str, page: int, source: str) -> Image.Im
         gap = size + 22   # 이야기체는 줄간격을 여유있게
         inner_w = W - MARGIN * 2 - pad * 2
         lines = _wrap(draw, text, f, inner_w)
-        panel_h = pad + 64 + len(lines) * gap + pad - 14
+        panel_h = pad + 64 + len(lines) * gap + 66 + pad - 14   # +66 = 닫는 따옴표 공간
         if y + panel_h <= H - 160:
             break
     lines = lines[:14]
@@ -488,6 +485,9 @@ def _slide_context(background, context: str, page: int, source: str) -> Image.Im
     for line in lines:
         _draw_line_rich(draw, MARGIN + pad, ty, line, f, WHITE)
         ty += gap
+    # 닫는 따옴표 — 여는 따옴표와 짝 맞춰 우하단에
+    draw.text((W - MARGIN - pad + 6, ty - 26), "”", font=_font(True, 110),
+              fill=HILITE, anchor="ra")
     return img.convert("RGB")
 
 
