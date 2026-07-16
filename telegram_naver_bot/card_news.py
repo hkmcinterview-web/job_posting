@@ -339,17 +339,56 @@ def _content_bg(background: Image.Image) -> Image.Image:
     return img
 
 
+_NUM_RE = re.compile(r"(?<![A-Za-z가-힣0-9])\d[\d,.]*\s*(?:%|만원|억원|조원|원|억|조|km|kg|kWh|GWh|년|월|일|명|개|대|위|배|차)?")
+
+
+def _draw_line_rich(draw, x, y, line, font, fill):
+    """한 줄을 그리되 숫자/금액/단위는 노란색으로 자동 강조 — 사람 손맛 포인트."""
+    pos = 0
+    for m in _NUM_RE.finditer(line):
+        pre = line[pos:m.start()]
+        if pre:
+            draw.text((x, y), pre, font=font, fill=fill)
+            x += draw.textlength(pre, font=font)
+        draw.text((x, y), m.group(0), font=font, fill=HILITE)
+        x += draw.textlength(m.group(0), font=font)
+        pos = m.end()
+    rest = line[pos:]
+    if rest:
+        draw.text((x, y), rest, font=font, fill=fill)
+
+
+def _draw_rich_wrapped(draw, x, y, text, font, max_width, gap, fill=WHITE, max_lines=12):
+    for line in _wrap(draw, text, font, max_width)[:max_lines]:
+        _draw_line_rich(draw, x, y, line, font, fill)
+        y += gap
+    return y
+
+
+def _draw_panel(img: Image.Image, box, radius=22):
+    """반투명 유리 패널 — 내용을 묶어서 '디자인된' 느낌을 준다."""
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(overlay)
+    d.rounded_rectangle(box, radius=radius, fill=(255, 255, 255, 22),
+                        outline=(255, 255, 255, 48), width=2)
+    img.alpha_composite(overlay)
+
+
+def _draw_check(draw, x, y, size=34):
+    """체크마크 (폰트 이모지 대신 직접 그림)."""
+    draw.line([(x + 6, y + size * 0.55), (x + size * 0.38, y + size * 0.85),
+               (x + size * 0.92, y + size * 0.12)], fill=HILITE, width=7, joint="curve")
+
+
 def _slide_frame(background, page: int, label: str, title: str, source: str):
-    """콘텐츠 장 공통 틀: 배경 + 페이지표시 + 라벨 칩 + 큰 제목 + footer.
-    returns (img, draw, 본문 시작 y)"""
-    img = _content_bg(background)
+    """콘텐츠 장 공통 틀: 배경 + 페이지표시 + 라벨 칩 + 큰 제목 + 포인트 바 + footer.
+    returns (img(RGBA), draw, 본문 시작 y)"""
+    img = _content_bg(background).convert("RGBA")
     draw = ImageDraw.Draw(img)
 
-    # 우상단 페이지 표시
     draw.text((W - MARGIN, 78), f"{page}/{CAROUSEL_TOTAL}", font=_font(False, 30),
               fill=SUBTEXT, anchor="ra")
 
-    # 라벨 칩 (빨간 알약) + 큰 제목
     f_chip = _brand_font(32)
     tw = draw.textlength(label, font=f_chip)
     padx, ch = 26, 56
@@ -357,68 +396,114 @@ def _slide_frame(background, page: int, label: str, title: str, source: str):
                            radius=ch // 2, fill=ACCENT)
     draw.text((MARGIN + padx, 140 + ch / 2), label, font=f_chip, fill=WHITE, anchor="lm")
 
-    tf = _font(True, 58)
-    draw.text((MARGIN, 236), title, font=tf, fill=WHITE)
+    draw.text((MARGIN, 230), title, font=_font(True, 58), fill=WHITE)
+    draw.rectangle([MARGIN + 4, 318, MARGIN + 108, 327], fill=HILITE)   # 제목 아래 포인트 바
 
     _draw_footer(draw, source, H - 74)
-    return img, draw, 356
-
-
-def _draw_wrapped(draw, x, y, text, font, max_width, gap, fill=WHITE, max_lines=14):
-    for line in _wrap(draw, text, font, max_width)[:max_lines]:
-        draw.text((x, y), line, font=font, fill=fill)
-        y += gap
-    return y
+    return img, draw, 380
 
 
 def _slide_summary(background, summary: str, page: int, source: str) -> Image.Image:
+    """2장 — 요약 문장들을 하나의 유리 패널에 'ㆍ' 로 촘촘하게 묶는다."""
     img, draw, y = _slide_frame(background, page, "핵심 요약", "한눈에 보는 핵심", source)
-    f = _font(True, 42)
-    for para in [p.strip() for p in (summary or "").split("\n") if p.strip()]:
-        y = _draw_wrapped(draw, MARGIN, y, para, f, W - MARGIN * 2, 62)
-        y += 26
-        if y > H - 220:
+    f = _font(True, 40)
+    gap, item_gap, pad = 56, 20, 38
+    items = [p.strip().lstrip("-•· ") for p in (summary or "").split("\n") if p.strip()][:5]
+    inner_w = W - MARGIN * 2 - pad * 2 - 40
+
+    # 공간에 들어가는 문장까지만 채택한 뒤, 그 높이에 딱 맞게 패널을 그린다
+    fit, used_h = [], 0
+    for it in items:
+        h = len(_wrap(draw, it, f, inner_w)) * gap
+        need = used_h + h + (item_gap if fit else 0)
+        if y + pad * 2 + need - 12 > H - 170:
             break
-    return img
+        fit.append((it, h))
+        used_h = need
+    panel_h = pad * 2 + used_h - 12
+    _draw_panel(img, [MARGIN, y, W - MARGIN, y + panel_h])
+    draw = ImageDraw.Draw(img)
+
+    ty = y + pad
+    for it, h in fit:
+        draw.text((MARGIN + pad, ty), "ㆍ", font=f, fill=HILITE)
+        _draw_rich_wrapped(draw, MARGIN + pad + 40, ty, it, f, inner_w, gap)
+        ty += h + item_gap
+    return img.convert("RGB")
 
 
 def _slide_bullets(background, items: list, page: int, source: str,
                    label: str, title: str) -> Image.Image:
+    """3장 — 인사이트 하나당 유리 패널 하나 + 노란 번호 뱃지."""
     img, draw, y = _slide_frame(background, page, label, title, source)
-    f = _font(True, 42)
-    num_f = _font(True, 34)
-    for i, item in enumerate(items[:4], 1):
-        if y > H - 230:
+    f = _font(True, 40)
+    gap, pad = 56, 34
+    for i, item in enumerate(items[:3], 1):
+        text = item.lstrip("-•· ").strip()
+        inner_w = W - MARGIN * 2 - pad * 2 - 76
+        n = len(_wrap(draw, text, f, inner_w))
+        ph = pad * 2 + n * gap - 12
+        if y + ph > H - 170:
             break
-        r = 24
-        draw.ellipse([MARGIN, y + 6, MARGIN + r * 2, y + 6 + r * 2], fill=HILITE)
-        draw.text((MARGIN + r, y + 6 + r), str(i), font=num_f, fill=DARK, anchor="mm")
-        y = _draw_wrapped(draw, MARGIN + r * 2 + 22, y, item.lstrip("-• ").strip(),
-                          f, W - MARGIN * 2 - r * 2 - 22, 60)
-        y += 34
-    return img
+        _draw_panel(img, [MARGIN, y, W - MARGIN, y + ph])
+        draw = ImageDraw.Draw(img)
+        r = 26
+        bcy = y + pad + gap / 2 - 6
+        draw.ellipse([MARGIN + pad, bcy - r, MARGIN + pad + r * 2, bcy + r], fill=HILITE)
+        draw.text((MARGIN + pad + r, bcy), str(i), font=_font(True, 32), fill=DARK, anchor="mm")
+        _draw_rich_wrapped(draw, MARGIN + pad + 76, y + pad, text, f, inner_w, gap)
+        y += ph + 26
+    return img.convert("RGB")
 
 
 def _slide_interview(background, interview: dict, page: int, source: str) -> Image.Image:
+    """4장 — 인용(따옴표) 스타일 질문 카드 + 체크마크 답변 + TIP."""
     img, draw, y = _slide_frame(background, page, "면접 활용", "면접에서 이렇게 써먹자", source)
     q = (interview.get("q") or "").strip()
     points = interview.get("points") or []
 
+    # 질문 패널 — 좌측 노란 바 + 큰따옴표
     qf = _font(True, 46)
-    draw.text((MARGIN, y), "Q.", font=_font(True, 52), fill=HILITE)
-    y = _draw_wrapped(draw, MARGIN + 78, y, q, qf, W - MARGIN * 2 - 78, 64, fill=HILITE)
-    y += 44
+    pad, gap_q = 40, 64
+    inner_w = W - MARGIN * 2 - pad * 2
+    q_lines = _wrap(draw, q, qf, inner_w)[:3]
+    q_h = pad + 58 + len(q_lines) * gap_q + pad - 16
+    _draw_panel(img, [MARGIN, y, W - MARGIN, y + q_h])
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle([MARGIN, y, MARGIN + 9, y + q_h], radius=4, fill=HILITE)
+    draw.text((MARGIN + pad - 6, y + pad - 26), "“", font=_font(True, 110), fill=HILITE)
+    draw.text((W - MARGIN - pad, y + pad - 2), "예상 면접 질문", font=_font(False, 27),
+              fill=SUBTEXT, anchor="ra")
+    ty = y + pad + 58
+    for line in q_lines:
+        draw.text((MARGIN + pad, ty), line, font=qf, fill=WHITE)
+        ty += gap_q
+    y += q_h + 46
 
-    draw.text((MARGIN, y), "A.", font=_font(True, 52), fill=WHITE)
-    af = _font(True, 42)
-    ay = y
+    # 답변 포인트 — 체크마크
+    draw.text((MARGIN, y), "이렇게 답해보세요", font=_font(True, 34), fill=HILITE)
+    y += 66
+    af = _font(True, 40)
+    gap = 56
     for p in points[:3]:
-        if ay > H - 220:
+        text = p.lstrip("-•· ").strip()
+        n = len(_wrap(draw, text, af, W - MARGIN * 2 - 64))
+        if y + n * gap > H - 230:
             break
-        ay = _draw_wrapped(draw, MARGIN + 78, ay, "· " + p.lstrip("-• ").strip(),
-                           af, W - MARGIN * 2 - 78, 60)
-        ay += 22
-    return img
+        _draw_check(draw, MARGIN, y + 6)
+        y = _draw_rich_wrapped(draw, MARGIN + 64, y, text, af, W - MARGIN * 2 - 64, gap)
+        y += 30
+
+    # TIP 뱃지
+    tf = _font(True, 28)
+    ty2 = H - 156
+    lw = draw.textlength("TIP", font=tf)
+    draw.rounded_rectangle([MARGIN, ty2, MARGIN + lw + 30, ty2 + 46], radius=10,
+                           outline=HILITE, width=2)
+    draw.text((MARGIN + 15, ty2 + 23), "TIP", font=tf, fill=HILITE, anchor="lm")
+    draw.text((MARGIN + lw + 30 + 18, ty2 + 23), "저장해두고 면접 전에 다시 보세요",
+              font=_font(False, 30), fill=SUBTEXT, anchor="lm")
+    return img.convert("RGB")
 
 
 def render_carousel(card: dict, article: dict, extras: dict, out_prefix: str) -> list:
