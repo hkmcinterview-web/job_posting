@@ -48,6 +48,14 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 # ② Claude (유료)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
+# ③ 로컬 오픈소스 모델(Ollama) — Gemini/Claude 가 전부 막혔을 때 마지막 폴백.
+# 완전 무료·오프라인이지만 이 PC 사양(내장그래픽)에서는 CPU로 돌아 카드 1장에
+# 20~60초 정도 걸릴 수 있습니다. 이미지(공고 캡처) 분석은 지원하지 않고 텍스트만 처리합니다.
+# 설치: 1) https://ollama.com 에서 Ollama 설치
+#      2) cmd 에서 `ollama pull qwen2.5:7b-instruct` 실행 (모델 다운로드, 4GB 정도)
+#      3) 아래 값을 채우면 자동으로 마지막 폴백에 사용됨. 비워두면 아예 시도 안 함.
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
 # ── 게시글/카드 설정 ─────────────────────────────────────
 BRAND_NAME = os.getenv("BRAND_NAME", "공대생현직자 잡앤유")

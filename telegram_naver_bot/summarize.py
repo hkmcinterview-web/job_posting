@@ -214,7 +214,17 @@ def build_card_options(article: dict, n_options: int = 3):
             error = error or "Claude 응답에 후보가 없음"
         except Exception as e:
             error = f"Claude: {e}"
-            print(f"[summarize] Claude 요약 실패, 휴리스틱으로 대체: {e}")
+            print(f"[summarize] Claude 요약 실패, 다음 방식으로 대체: {e}")
+
+    if config.OLLAMA_MODEL:
+        try:
+            extras, options = _build_cards_ollama(prompt)
+            if options:
+                return options[:n_options], "ollama", "", extras
+            error = error or "로컬 모델 응답에 후보가 없음"
+        except Exception as e:
+            error = f"로컬 모델: {e}"
+            print(f"[summarize] Ollama 요약 실패, 휴리스틱으로 대체: {e}")
 
     heuristic_extras = {"summary": _heuristic_summary(article), "context": "",
                         "outlook": [], "caption": ""}
@@ -309,12 +319,43 @@ def _build_cards_claude(prompt: str):
     return _extract_extras(text), _extract_cards(text)
 
 
+# ── ③ 로컬 오픈소스 모델 (Ollama) — Gemini/Claude 가 전부 막혔을 때 마지막 폴백 ──
+
+def _ollama_generate(prompt: str, temperature: float = 0.4) -> str:
+    """로컬에 설치된 Ollama 모델로 생성. 이미지(비전)는 지원하지 않음 — 텍스트 전용.
+    Ollama 앱이 실행 중이어야 하며, 이 PC 는 내장그래픽이라 CPU 로 돌아 다소 느릴 수 있음."""
+    url = f"{config.OLLAMA_HOST}/api/generate"
+    payload = {
+        "model": config.OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": temperature},
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=180)   # CPU 생성 대비 넉넉한 타임아웃
+    except requests.exceptions.ConnectionError:
+        raise RuntimeError(
+            "Ollama 에 연결할 수 없습니다 — Ollama 앱이 실행 중인지 확인해주세요 "
+            f"(설치: https://ollama.com, 주소: {config.OLLAMA_HOST})")
+    if resp.status_code == 404:
+        raise RuntimeError(f"모델 '{config.OLLAMA_MODEL}' 이 없습니다. "
+                           f"cmd 에서 `ollama pull {config.OLLAMA_MODEL}` 을 먼저 실행해주세요.")
+    if resp.status_code != 200:
+        raise RuntimeError(f"Ollama HTTP {resp.status_code}: {resp.text[:200]}")
+    return resp.json().get("response", "")
+
+
+def _build_cards_ollama(prompt: str):
+    text = _ollama_generate(prompt)
+    return _extract_extras(text), _extract_cards(text)
+
+
 # ── 공용: 다른 기능(채용공고 등)에서도 같은 AI 폴백 체인을 쓰도록 공개 ──
 
 def generate_text(prompt: str, temperature: float = 0.4, images=None):
     """프롬프트(+이미지)를 AI 에 보내 원문 텍스트를 받는다. returns (text, engine, error).
 
-    images: [(mime_type, base64), ...] — 채용공고 캡처 사진 등."""
+    images: [(mime_type, base64), ...] — 채용공고 캡처 사진 등 (로컬 모델은 이미지 미지원)."""
     error = ""
     if config.GEMINI_API_KEY:
         try:
@@ -328,6 +369,12 @@ def generate_text(prompt: str, temperature: float = 0.4, images=None):
         except Exception as e:
             error = f"Claude: {e}"
             print(f"[summarize] Claude 호출 실패: {e}")
+    if config.OLLAMA_MODEL and not images:   # 로컬 모델은 이미지(비전) 미지원
+        try:
+            return _ollama_generate(prompt, temperature=temperature), "ollama", ""
+        except Exception as e:
+            error = f"로컬 모델: {e}"
+            print(f"[summarize] Ollama 호출 실패: {e}")
     return "", "none", error or "AI 키(GEMINI_API_KEY 등)가 설정되지 않음"
 
 
