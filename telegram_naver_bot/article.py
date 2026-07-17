@@ -127,6 +127,29 @@ def fetch_article(url: str) -> dict:
     }
 
 
+def _shrink_screenshot(raw: bytes) -> bytes:
+    """전체 화면 캡처가 너무 크면 AI 업로드가 수십 분씩 걸리며 멈춘 것처럼 보인다.
+    가로 900px, 세로 최대 6000px 로 줄이고 JPEG 재압축해 크기를 확실히 제한한다."""
+    import io
+
+    from PIL import Image
+
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        if img.width > 900:
+            img = img.resize((900, round(img.height * 900 / img.width)), Image.LANCZOS)
+        if img.height > 6000:   # 그 아래는 푸터/약관인 경우가 대부분
+            img = img.crop((0, 0, img.width, 6000))
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=72)
+        out = buf.getvalue()
+        print(f"[article] 캡처 축소: {len(raw)} → {len(out)} bytes ({img.width}x{img.height})")
+        return out
+    except Exception as e:
+        print(f"[article] 캡처 축소 실패(원본 사용): {e}")
+        return raw
+
+
 def _rendered_page_text(url: str):
     """자바스크립트로만 그려지는 페이지 폴백 — 진짜 브라우저(Playwright)로 열어서
     렌더링이 끝난 뒤의 텍스트를 수집한다. returns (title, text, screenshot|None)
@@ -169,6 +192,7 @@ def _rendered_page_text(url: str):
                         page.evaluate("window.scrollTo(0, 0)")
                         screenshot = page.screenshot(full_page=True, type="jpeg", quality=80)
                         print(f"[article] 텍스트가 부족해 전체 화면 캡처 ({len(screenshot)} bytes)")
+                        screenshot = _shrink_screenshot(screenshot)
                     except Exception as e:
                         print(f"[article] 화면 캡처 실패: {e}")
             finally:
