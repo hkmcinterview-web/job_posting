@@ -249,17 +249,21 @@ def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int,
         tg.send_message(chat_id, f"⚠️ 카페 게시 실패: {e}")
 
 
-def _download_photos(tg, file_ids: list, stamp: int):
-    """사진들을 내려받아 (AI 비전용 base64 목록, 카페 첨부용 원본 파일 경로 목록)을 반환."""
+def _download_photos(tg, files: list, stamp: int):
+    """files: [(file_id, mime_type), ...] — '사진'으로 보내든 '파일(문서)'로 보내든
+    실제 mime_type 을 그대로 써서 내려받는다.
+    returns (AI 비전용 base64 목록, 카페 첨부용 원본 파일 경로 목록)."""
     import base64
 
     config.CARDS_DIR.mkdir(parents=True, exist_ok=True)
     images, photo_paths = [], []
-    for n, fid in enumerate(file_ids[:5], 1):
+    for n, (fid, mime) in enumerate(files[:5], 1):
         try:
             raw = tg.download_file(fid)
-            images.append(("image/jpeg", base64.b64encode(raw).decode()))
-            p = config.CARDS_DIR / f"job_src_{stamp}_{n}.jpg"   # 카페 첨부용 원본 보관
+            mime = mime or "image/jpeg"
+            images.append((mime, base64.b64encode(raw).decode()))
+            ext = ".png" if "png" in mime else ".jpg"
+            p = config.CARDS_DIR / f"job_src_{stamp}_{n}{ext}"   # 카페 첨부용 원본 보관
             p.write_bytes(raw)
             photo_paths.append(p)
         except Exception as e:
@@ -704,12 +708,23 @@ def main():
                 print(f"[main] 허용되지 않은 chat_id={chat_id} — 무시")
                 continue
 
-            # 사진 메시지 — 앨범 단위로 모아서 아래에서 한 번에 처리
+            # 사진(압축) 또는 이미지 파일(문서로 첨부) 메시지 — 앨범 단위로 모아서 처리.
+            # 텔레그램에서 클립 아이콘으로 '파일' 선택해 원본 그대로 보내면 photo 가 아니라
+            # document 로 오는데, 이것도 이미지(mime_type 이 image/*)면 똑같이 인식한다.
+            img_file = None
             if msg.get("photo"):
+                img_file = (msg["photo"][-1]["file_id"], "image/jpeg")   # 압축 사진은 항상 JPEG
+            else:
+                doc = msg.get("document") or {}
+                mime = doc.get("mime_type") or ""
+                if doc.get("file_id") and mime.startswith("image/"):
+                    img_file = (doc["file_id"], mime)
+
+            if img_file:
                 key = msg.get("media_group_id") or f"single_{msg.get('message_id')}"
                 g = photo_groups.setdefault(key, {"chat_id": chat_id, "caption": "",
                                                   "file_ids": []})
-                g["file_ids"].append(msg["photo"][-1]["file_id"])  # 가장 큰 해상도
+                g["file_ids"].append(img_file)
                 if msg.get("caption"):
                     g["caption"] = (g["caption"] + "\n" + msg["caption"]).strip()
                 continue
