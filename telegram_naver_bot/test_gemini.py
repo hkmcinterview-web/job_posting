@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """Gemini API 키(들)가 제대로 되는지 확인하는 도구.
 
-.env 의 GEMINI_API_KEY 에 등록된 키를 전부(콤마 구분) 하나씩 점검합니다.
-키 여러 개가 전부 429(사용량 초과)로 뜬다면, 서로 다른 계정으로 만든 게 맞는지
-quotaId 를 비교해서 확인할 수 있습니다 — 여러 키의 quotaId 가 똑같다면
-사실 같은 프로젝트(같은 할당량 통)를 공유하고 있다는 뜻입니다.
+.env 의 GEMINI_API_KEY 에 등록된 키를 전부(콤마 구분) 하나씩, 여러 모델에 걸쳐 점검합니다.
+※ quotaId(예: GenerateRequestsPerDayPerProjectPerModel-FreeTier)는 '할당량 종류의 이름'일
+뿐이라 계정이 다르든 같든 항상 똑같이 나옵니다 — 이것만으로는 키가 같은 프로젝트를
+공유하는지 구분할 수 없습니다. 이 도구는 대신 어떤 모델이 막혔는지, 어떤 모델은 아직
+시도조차 안 됐는지(할당량이 남아있을 가능성)를 보여주는 데 씁니다.
 
 사용법:  python test_gemini.py
 """
@@ -14,18 +15,20 @@ import config
 
 
 def _check_one_key(key: str, label: str) -> dict:
-    """returns {'ok': bool, 'quota_id': str|None, 'model': str|None}"""
+    """모델을 하나씩 순서대로 시도 (성공하면 즉시 멈춤).
+    returns {'ok': bool, 'model': str|None, 'blocked_models': [str,...]}"""
     print(f"\n{'='*50}")
     print(f"🔑 {label}: {key[:6]}...{key[-4:]} (길이 {len(key)})")
     payload = {"contents": [{"parts": [{"text": "한국어로 '테스트 성공' 이라고만 답해줘"}]}]}
     models, seen = [], set()
     for m in [config.GEMINI_MODEL, "gemini-3.5-flash", "gemini-flash-latest",
-              "gemini-2.5-flash", "gemini-2.0-flash"]:
+              "gemini-2.0-flash", "gemini-2.0-flash-lite",
+              "gemini-1.5-flash", "gemini-1.5-flash-8b"]:
         if m and m not in seen:
             seen.add(m)
             models.append(m)
 
-    last_quota_id = None
+    blocked = []
     for model in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         try:
@@ -40,28 +43,29 @@ def _check_one_key(key: str, label: str) -> dict:
             cand = (data.get("candidates") or [{}])[0]
             txt = "".join(p.get("text", "") for p in cand.get("content", {}).get("parts", []))
             print(f"   ✅ 정상 작동! 응답: {txt.strip()[:80]}")
-            return {"ok": True, "quota_id": None, "model": model}
+            return {"ok": True, "model": model, "blocked_models": blocked}
         elif r.status_code in (401, 403):
             print(f"      ❌ 키 인증 실패 — 키가 틀렸거나 권한이 없습니다.")
-            return {"ok": False, "quota_id": None, "model": None}
+            return {"ok": False, "model": None, "blocked_models": blocked}
         elif r.status_code == 404:
-            continue
+            continue   # 이 모델 자체가 이 계정/API 에 없음 — 할당량과 무관
         elif r.status_code == 429:
+            blocked.append(model)
             try:
                 err = r.json().get("error", {})
                 for detail in err.get("details", []):
                     if detail.get("@type", "").endswith("QuotaFailure"):
                         for v in detail.get("violations", []):
-                            qid = v.get("quotaId")
-                            print(f"      → 제한 항목(quotaId): {qid}")
-                            last_quota_id = qid
+                            print(f"      → 제한 항목: {v.get('quotaId')}")
             except Exception:
                 pass
+        elif r.status_code == 503:
+            print("      (일시적 서버 과부하 — 할당량과 무관, 잠시 후엔 될 수도 있음)")
         else:
             print(f"      기타 오류: {r.text[:200]}")
 
     print(f"   ❌ 이 키로는 사용 가능한 모델을 찾지 못했습니다.")
-    return {"ok": False, "quota_id": last_quota_id, "model": None}
+    return {"ok": False, "model": None, "blocked_models": blocked}
 
 
 def main():
@@ -84,25 +88,17 @@ def main():
             print(f"  ✅ 키{i} — 정상 (모델: {res['model']})")
             ok_any = True
         else:
-            print(f"  ❌ 키{i} — 실패 (quotaId: {res['quota_id']})")
+            blocked = ", ".join(res["blocked_models"]) or "(없음)"
+            print(f"  ❌ 키{i} — 실패 (할당량 초과 모델: {blocked})")
 
     if ok_any:
         print("\n→ 최소 1개 키가 정상이니 봇에서 자동으로 그 키를 씁니다.")
-        return
-
-    quota_ids = [r["quota_id"] for r in results if r["quota_id"]]
-    if len(quota_ids) >= 2 and len(set(quota_ids)) == 1:
-        print("\n⚠️ 모든 키의 quotaId 가 동일합니다 — 서로 다른 계정으로 만든 것 같아도")
-        print("   실제로는 같은 프로젝트(같은 할당량 통)를 공유하고 있을 가능성이 높습니다.")
-        print("   해결: 브라우저에서 완전히 로그아웃하거나 시크릿창으로 다른 구글 계정에")
-        print("   로그인한 뒤, https://aistudio.google.com/apikey 에서 'Create API key in")
-        print("   NEW PROJECT' 를 선택해 키를 새로 만들어보세요.")
-    elif len(quota_ids) >= 2:
-        print("\n모든 키가 각자 다른 quotaId 로 막혀 있습니다 — 계정은 잘 분리된 것 같고,")
-        print("   단순히 오늘 테스트가 많아서 전부 소진된 것으로 보입니다. 내일 다시 시도하거나")
-        print("   구글 계정을 하나 더 추가해보세요.")
     else:
-        print("\n키 인증 자체가 실패했을 수 있습니다 — 위 로그의 상세 오류를 확인해주세요.")
+        print("\n등록된 키 전부, 이 목록의 모델을 전부 오늘 하루 다 써버린 상태입니다.")
+        print("(참고: quotaId 는 계정과 무관하게 항상 같은 이름으로 나오는 '할당량 종류' 표시라,")
+        print(" 이것만으로는 키들이 같은 프로젝트를 공유하는지는 알 수 없습니다.)")
+        print("→ 내일(할당량은 매일 리셋) 다시 시도하거나, 구글 계정을 하나 더 추가하거나,")
+        print("  Claude 를 유료 폴백으로 추가(.env 의 ANTHROPIC_API_KEY)하는 방법이 있습니다.")
 
 
 if __name__ == "__main__":

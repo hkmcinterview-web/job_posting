@@ -238,8 +238,12 @@ def _gemini_generate(prompt: str, temperature: float = 0.9, images=None) -> str:
         "generationConfig": {"temperature": temperature},
     }
     models, seen = [], set()
+    # 할당량은 '모델별로 따로' 매겨지므로(quotaId 에 PerModel), 서로 다른 모델을
+    # 최대한 많이 순회할수록 어느 한 모델이 소진돼도 다른 모델에 남은 할당량을 쓸 수 있다.
+    # gemini-2.5-flash 는 실측 결과 이 API 표면에서 404(모델 없음)라 목록에서 제외.
     for m in [config.GEMINI_MODEL, "gemini-3.5-flash", "gemini-flash-latest",
-              "gemini-2.5-flash", "gemini-2.0-flash"]:
+              "gemini-2.0-flash", "gemini-2.0-flash-lite",
+              "gemini-1.5-flash", "gemini-1.5-flash-8b"]:
         if m and m not in seen:
             seen.add(m)
             models.append(m)
