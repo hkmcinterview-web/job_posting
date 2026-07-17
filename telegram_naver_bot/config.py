@@ -39,7 +39,11 @@ NAVER_TOKEN_FILE = BASE_DIR / "naver_tokens.json"
 
 # ── AI 요약 (선택 — 없으면 og 메타데이터 기반 요약으로 대체) ──
 # ① 구글 Gemini (무료 등급) — aistudio.google.com/apikey 에서 발급
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# 여러 구글 계정으로 키를 여러 개 만들어 콤마로 나열하면, 한 키가 할당량 초과(429)일 때
+# 봇이 자동으로 다음 키로 넘어가서 시도합니다 (무료 등급을 키 개수만큼 늘리는 효과).
+# 예: GEMINI_API_KEY=키1,키2,키3
+GEMINI_API_KEYS = [k.strip() for k in os.getenv("GEMINI_API_KEY", "").split(",") if k.strip()]
+GEMINI_API_KEY = GEMINI_API_KEYS[0] if GEMINI_API_KEYS else ""   # 기존 코드 호환용(첫 키)
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 # ② Claude (유료)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")

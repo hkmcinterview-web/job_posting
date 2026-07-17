@@ -224,8 +224,11 @@ def build_card_options(article: dict, n_options: int = 3):
 # ── ① 구글 Gemini (무료 등급) ────────────────────────────
 
 def _gemini_generate(prompt: str, temperature: float = 0.9, images=None) -> str:
-    """Gemini 에 프롬프트를 보내 원문 텍스트를 받는다 (모델 자동 대체 포함).
+    """Gemini 에 프롬프트를 보내 원문 텍스트를 받는다.
 
+    키 여러 개(GEMINI_API_KEY 에 콤마로 나열) × 모델 여러 개를 순회해서,
+    한 키/모델이 할당량 초과(429)여도 다음 키로 자동 대체합니다
+    (무료 등급을 키 개수만큼 늘리는 효과).
     images: [(mime_type, base64문자열), ...] — 채용공고 캡처 등 이미지 입력 (비전)."""
     parts = [{"text": prompt}]
     for mime, b64 in (images or []):
@@ -234,7 +237,6 @@ def _gemini_generate(prompt: str, temperature: float = 0.9, images=None) -> str:
         "contents": [{"parts": parts}],
         "generationConfig": {"temperature": temperature},
     }
-    # 설정 모델을 먼저 시도하고, 실패(모델 없음/그 모델만 quota 0 등)하면 대체 모델들을 순서대로 시도
     models, seen = [], set()
     for m in [config.GEMINI_MODEL, "gemini-3.5-flash", "gemini-flash-latest",
               "gemini-2.5-flash", "gemini-2.0-flash"]:
@@ -242,28 +244,32 @@ def _gemini_generate(prompt: str, temperature: float = 0.9, images=None) -> str:
             seen.add(m)
             models.append(m)
 
+    keys = config.GEMINI_API_KEYS or ([config.GEMINI_API_KEY] if config.GEMINI_API_KEY else [])
+    if not keys:
+        raise RuntimeError("GEMINI_API_KEY 가 설정되지 않음")
+
     last_err = None
-    for model in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        resp = requests.post(url, params={"key": config.GEMINI_API_KEY},
-                             json=payload, timeout=40)
-        if resp.status_code == 404:  # 모델 이름 문제 — 다음 후보로
-            last_err = f"모델 '{model}' 없음(404)"
-            continue
-        if resp.status_code == 429:  # 이 모델만 quota 0/초과일 수 있음 — 다음 후보로
-            last_err = f"모델 '{model}' 사용량 초과(429)"
-            continue
-        if resp.status_code == 503:  # 모델 일시 과부하 — 다음 후보로
-            last_err = f"모델 '{model}' 일시 과부하(503)"
-            continue
-        if resp.status_code != 200:
-            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
-        data = resp.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            raise RuntimeError(f"응답 비어있음(안전필터 가능): {str(data)[:200]}")
-        parts = candidates[0].get("content", {}).get("parts", [])
-        return "".join(p.get("text", "") for p in parts)
+    for ki, key in enumerate(keys, 1):
+        for model in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            resp = requests.post(url, params={"key": key}, json=payload, timeout=40)
+            if resp.status_code == 404:  # 모델 이름 문제 — 다음 후보로
+                last_err = f"모델 '{model}' 없음(404)"
+                continue
+            if resp.status_code == 429:  # 이 키/모델만 quota 초과일 수 있음 — 다음 후보로
+                last_err = f"키{ki} 모델 '{model}' 사용량 초과(429)"
+                continue
+            if resp.status_code == 503:  # 모델 일시 과부하 — 다음 후보로
+                last_err = f"모델 '{model}' 일시 과부하(503)"
+                continue
+            if resp.status_code != 200:
+                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                raise RuntimeError(f"응답 비어있음(안전필터 가능): {str(data)[:200]}")
+            parts = candidates[0].get("content", {}).get("parts", [])
+            return "".join(p.get("text", "") for p in parts)
 
     raise RuntimeError(last_err or "사용 가능한 Gemini 모델 없음")
 
