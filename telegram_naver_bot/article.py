@@ -178,26 +178,33 @@ def _rendered_page_text(url: str):
     except ImportError:
         print("[article] playwright 미설치 — 브라우저 렌더링 폴백 생략")
         return "", "", None
-    title, text, screenshot = "", "", None
+    title, text, early_shot = "", "", None
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+            # 안티봇/크래시 완화 옵션 + 헤드리스 티 줄이기
+            browser = pw.chromium.launch(headless=True, args=[
+                "--disable-dev-shm-usage", "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+            ])
             page = browser.new_page(user_agent=HEADERS["User-Agent"],
                                     viewport={"width": 1080, "height": 1600})
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(3000)   # 스크립트가 내용을 그릴 시간
-                try:  # 지연 로딩 대비 스크롤 후 맨 위로 복귀
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    page.wait_for_timeout(1500)
-                    page.evaluate("window.scrollTo(0, 0)")
-                except Exception:
-                    pass
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(3500)   # 스크립트가 내용을 그릴 시간
+
+                # ⚡ 텍스트 추출·스크롤 전에 '먼저' 캡처 — 안티봇이 페이지를 닫기 전에 확보
                 try:
                     title = page.title() or ""
                 except Exception:
                     title = ""
+                early_shot = _capture(page)
+
+                # 이후 텍스트 수집 (실패해도 early_shot 은 이미 확보됨)
+                try:
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(1200)
+                except Exception:
+                    pass
                 texts = []
                 for frame in page.frames:   # 메인 문서 + 모든 iframe
                     try:
@@ -207,8 +214,6 @@ def _rendered_page_text(url: str):
                     except Exception:
                         pass
                 text = "\n".join(texts)
-                if len(" ".join(text.split())) < 600:
-                    screenshot = _capture(page)   # 텍스트 부실 → 화면 캡처(비전용)
             finally:
                 try:
                     browser.close()
@@ -216,6 +221,9 @@ def _rendered_page_text(url: str):
                     pass
     except Exception as e:
         print(f"[article] 브라우저 렌더링 실패({url}): {e}")
+
+    # 텍스트가 넉넉하면 캡처는 버리고, 부실하면 캡처(비전)를 쓴다
+    screenshot = early_shot if len(" ".join((text or "").split())) < 600 else None
 
     lines, prev = [], None
     for raw in (text or "").split("\n"):
