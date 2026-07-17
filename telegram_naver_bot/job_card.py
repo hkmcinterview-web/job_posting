@@ -231,13 +231,13 @@ def render_job_card(job: dict, out_name: str, logo: Image.Image = None):
     if head and rows:
         n = len(head)
         nrows = len(rows)
-        # 행 수에 따라 행 높이 조절 (4줄 이하는 넉넉, 많아질수록 촘촘)
-        row_h = 68 if nrows <= 4 else max(46, int(360 / nrows))
-        row_size = 44 if row_h >= 60 else (40 if row_h >= 52 else 34)
+        # 행 수에 따라 행 높이 조절 (4줄 이하는 넉넉, 많아질수록 촘촘 — 최대 10줄)
+        row_h = 68 if nrows <= 4 else max(42, int(400 / nrows))
+        row_size = 44 if row_h >= 60 else (40 if row_h >= 52 else (34 if row_h >= 46 else 30))
         head_size = 42 if nrows <= 5 else 38
 
-        pad_v = 34 if nrows <= 5 else 26
-        head_gap = 66 if nrows <= 5 else 58
+        pad_v = 34 if nrows <= 5 else 24
+        head_gap = 66 if nrows <= 5 else 56
         panel_h = pad_v + head_gap + 26 + nrows * row_h + pad_v - 14
         draw.rounded_rectangle([M - 20, y, W - M + 20, y + panel_h], radius=22,
                                fill=PANEL, outline=PANEL_LINE, width=2)
