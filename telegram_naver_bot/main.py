@@ -66,7 +66,7 @@ from editor import build_cafe_post, build_job_post
 from job_card import render_job_card
 from job_summary import build_job_data
 from linkutil import expand_short_links
-from message_parser import detect_mode, extract_links, split_title_body
+from message_parser import URL_RE, detect_mode, extract_links, split_title_body
 from naver_cafe import post_article
 from summarize import build_card_options
 from telegram_client import TelegramClient
@@ -89,12 +89,15 @@ HELP_TEXT = (
     "  https://n.news...\n"
     "  https://n.news...\n\n"
     "💼 채용공고 카드 + 카페 게시:\n"
-    "  첫 줄에 '채용' 이라고 쓰고, 채용공고 링크를 넣으세요.\n"
+    "  ▸ 가장 추천: 공고 내용을 복사(Ctrl+A, Ctrl+C)해서 '채용' 뒤에 붙여넣고,\n"
+    "    마지막 줄에 지원 링크도 함께 넣으세요 — 본문으로 카드를 만들고,\n"
+    "    링크는 '공고 원문' 참고용으로만 씁니다 (AI 사용량 절약, 안티봇 회피).\n"
+    "  ▸ 링크만 있어도 자동으로 읽어보긴 하지만, 사이트에 따라 안 될 수 있어요.\n"
+    "  ▸ 그래도 안 되면: 공고 화면을 캡처해서 '채용' 캡션과 함께 사진으로 (여러 장 가능)\n"
     "  예)\n"
     "  채용\n"
-    "  https://recruit...\n"
-    "  ▸ 링크가 안 읽히면: 공고 내용을 복사해 '채용' 뒤에 붙이거나,\n"
-    "  ▸ 공고 화면을 캡처해서 '채용' 캡션과 함께 사진으로 보내세요 (여러 장 가능)\n\n"
+    "  (공고 내용 전체 붙여넣기)\n"
+    "  https://recruit.../apply\n\n"
     "🔗 단축주소 펼치기:\n"
     "  첫 줄에 '펼치기' 라고 쓰고, 단축주소(buly.kr 등)가 든 글을 넣으면\n"
     "  원본 주소로 펼친 전체 글을 그대로 돌려드립니다.\n\n"
@@ -231,6 +234,16 @@ def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int,
 
 def handle_job(tg: TelegramClient, chat_id: int, content: str):
     links = extract_links(content)[: config.MAX_LINKS]
+
+    # 링크와 함께 공고 본문도 넉넉히 붙여넣은 경우 — 본문으로 카드를 만들고,
+    # 링크는 fetch/캡처 없이 '공고 원문' 참고용으로만 사용 (토큰 절약 + 안티봇 회피)
+    text_without_links = URL_RE.sub("", content).strip()
+    if links and len(text_without_links) >= 80:
+        tg.send_message(chat_id, "⏳ 붙여넣은 채용공고 내용 분석 중... (링크는 원문 참고용으로만 사용)")
+        page = {"url": links[0], "title": "", "description": "",
+                "text": text_without_links[:9000]}
+        _handle_one_job(tg, chat_id, page, 1)
+        return
 
     if links:
         for i, url in enumerate(links, 1):
