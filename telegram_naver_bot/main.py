@@ -21,10 +21,44 @@
 실행: python main.py  (24시간 켜져 있는 서버/PC 에서 실행)
 """
 import re
+import sys
 import time
 import traceback
 
 import config
+
+
+class _Tee:
+    """print 로 찍히는 모든 로그를 화면과 bot.log 파일에 동시에 남긴다.
+    (PowerShell 창을 못 봐도 bot.log 를 메모장으로 열면 로그 확인 가능)"""
+
+    def __init__(self, stream, path):
+        self.stream = stream
+        try:
+            self.logfile = open(path, "a", encoding="utf-8", buffering=1)
+        except Exception:
+            self.logfile = None
+
+    def write(self, data):
+        self.stream.write(data)
+        if self.logfile:
+            try:
+                self.logfile.write(data)
+            except Exception:
+                pass
+
+    def flush(self):
+        self.stream.flush()
+        if self.logfile:
+            try:
+                self.logfile.flush()
+            except Exception:
+                pass
+
+
+sys.stdout = _Tee(sys.stdout, config.BASE_DIR / "bot.log")
+sys.stderr = _Tee(sys.stderr, config.BASE_DIR / "bot.log")
+
 from article import fetch_article, fetch_job_page
 from card_news import render_carousel, render_cards
 from editor import build_cafe_post, build_job_post
