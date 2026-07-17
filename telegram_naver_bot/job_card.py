@@ -225,36 +225,44 @@ def render_job_card(job: dict, out_name: str, logo: Image.Image = None):
     else:
         y += 16
 
-    # ── 모집 표 (흰색 라운드 패널) ──
+    # ── 모집 표 (흰색 라운드 패널) — 행이 많으면 행높이·글자크기를 자동 축소 ──
     head = job.get("table_head") or []
     rows = job.get("table_rows") or []
     if head and rows:
         n = len(head)
-        pad_v = 34
-        panel_h = pad_v + 70 + 28 + len(rows) * 68 + pad_v - 14
+        nrows = len(rows)
+        # 행 수에 따라 행 높이 조절 (4줄 이하는 넉넉, 많아질수록 촘촘)
+        row_h = 68 if nrows <= 4 else max(46, int(360 / nrows))
+        row_size = 44 if row_h >= 60 else (40 if row_h >= 52 else 34)
+        head_size = 42 if nrows <= 5 else 38
+
+        pad_v = 34 if nrows <= 5 else 26
+        head_gap = 66 if nrows <= 5 else 58
+        panel_h = pad_v + head_gap + 26 + nrows * row_h + pad_v - 14
         draw.rounded_rectangle([M - 20, y, W - M + 20, y + panel_h], radius=22,
                                fill=PANEL, outline=PANEL_LINE, width=2)
         ty = y + pad_v
         centers = [M + (W - M * 2) * (i + 0.5) / n for i in range(n)]
-        hf = _font(True, 42)
+        hf = _font(True, head_size)
         for i, h in enumerate(head):
             draw.text((centers[i], ty), h[:6], font=hf, fill=INK, anchor="ma")
-        ty += 70   # 머리글 글자 높이(디센더 포함)보다 넉넉하게 — 밑줄과 겹치지 않도록
+        ty += head_gap
         draw.line([M + 4, ty, W - M - 4, ty], fill=accent, width=7)
-        ty += 28
+        ty += 26
 
-        rf = _font(True, 44)
+        rf = _font(True, row_size)
+        col_w = (W - M * 2) / n - 16
         for row in rows:
-            cell_f = rf
             longest = max(row, key=lambda c: draw.textlength(c, font=rf))
-            if draw.textlength(longest, font=rf) > (W - M * 2) / n - 16:
-                fit = _fit_font_size(draw, longest, (W - M * 2) / n - 16, 44, 28,
-                                     lambda s: _font(True, s))
-                cell_f = _font(True, fit)
+            cell_f = rf
+            if draw.textlength(longest, font=rf) > col_w:
+                cell_f = _font(True, _fit_font_size(draw, longest, col_w, row_size, 26,
+                                                    lambda s: _font(True, s)))
             for i, cell in enumerate(row):
-                draw.text((centers[i], ty), cell, font=cell_f, fill=INK, anchor="ma")
-            ty += 68
-        y += panel_h + 34
+                draw.text((centers[i], ty + (row_h - row_size) / 2 - 6), cell,
+                          font=cell_f, fill=INK, anchor="ma")
+            ty += row_h
+        y += panel_h + 30
 
     # ── 우하단 미니표 자리 먼저 계산 ──
     infos = job.get("infos") or []

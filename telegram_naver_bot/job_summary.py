@@ -38,8 +38,10 @@ def _build_prompt(page: dict, with_images: bool = False) -> str:
         "TITLE: 카드 큰 제목 1~2줄 — 줄 구분은 / (각 줄 4~12자, 회사명 포함, 예: 현대자동차/신입 채용)\n"
         "DEADLINE: 접수 마감 (예: 7.31(금) 17:00 — 없으면 '상시채용', 마감된 공고면 실제 마감일)\n"
         "BADGE: 빨간 뱃지 1~2개, | 구분, 각 2~5자 (예: 신입|정규직)\n"
-        "TABLE_HEAD: 모집 표 머리글 2~4개, | 구분 (예: 모집분야|경력|인원 — 공고 내용에 맞게 조정)\n"
-        "TABLE_ROW: 표 한 줄, | 구분, 머리글과 개수 일치. 최대 5줄 (분야가 많으면 대표만, 각 칸 2~10자)\n"
+        "TABLE_HEAD: 모집 표 머리글 2~4개, | 구분 (예: 구분|직무|근무지 — 공고 내용에 맞게 조정)\n"
+        "TABLE_ROW: 표 한 줄, | 구분, 머리글과 개수 일치. ⚠️ 공고에 나온 모집분야/직무를\n"
+        "          하나도 빠짐없이 전부 나열할 것 (임의로 합치거나 생략 금지). 공고에 5개면 5줄,\n"
+        "          7개면 7줄. 원문에 적힌 직무명·근무지를 그대로 쓰고, 지어내지 말 것 (각 칸 2~12자)\n"
         "POINT: 핵심 정보 한 줄씩 3~5개 (지원자격/전형절차/우대사항/근무조건/일정 등, 각 12~26자)\n"
         "       가장 중요한 부분은 {{이렇게}} 감싸서 강조 (전체에서 1~2곳만)\n"
         "INFO: 우하단 요약표 '항목|값' 형태 2~4개 (항목 2~5자, 값 2~8자. 예: 고용형태|정규직)\n"
@@ -96,11 +98,11 @@ def _parse_job(text: str) -> dict:
             if len(kv) >= 2 and kv[0] and kv[1]:
                 job["infos"].append((kv[0], kv[1]))
 
-    # 표 정합성 — 머리글 개수에 맞게 자르거나 채움
+    # 표 정합성 — 머리글 개수에 맞게 자르거나 채움 (모든 직무를 담기 위해 최대 8줄)
     ncol = len(job["table_head"])
     if ncol:
         rows = []
-        for row in job["table_rows"][:5]:
+        for row in job["table_rows"][:8]:
             row = (row + [""] * ncol)[:ncol]
             rows.append(row)
         job["table_rows"] = rows
@@ -116,7 +118,8 @@ def build_job_data(page: dict, images=None):
 
     images: [(mime_type, base64), ...] — 채용공고 캡처 사진 (링크 대신 사진으로 받은 경우)"""
     prompt = _build_prompt(page, with_images=bool(images))
-    text, engine, error = generate_text(prompt, temperature=0.3, images=images)
+    # temperature=0 — 같은 공고는 항상 같은 결과가 나오도록 (매번 다르게 묶이는 문제 방지)
+    text, engine, error = generate_text(prompt, temperature=0.0, images=images)
     if not text:
         return None, "", engine, error
 
