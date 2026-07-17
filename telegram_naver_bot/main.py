@@ -22,6 +22,7 @@
 """
 import re
 import sys
+import threading
 import time
 import traceback
 
@@ -96,7 +97,9 @@ HELP_TEXT = (
     "  ▸ 공고 화면을 캡처해서 '채용' 캡션과 함께 사진으로 보내세요 (여러 장 가능)\n\n"
     "🔗 단축주소 펼치기:\n"
     "  첫 줄에 '펼치기' 라고 쓰고, 단축주소(buly.kr 등)가 든 글을 넣으면\n"
-    "  원본 주소로 펼친 전체 글을 그대로 돌려드립니다."
+    "  원본 주소로 펼친 전체 글을 그대로 돌려드립니다.\n\n"
+    "🛑 멈추기:\n"
+    "  처리가 오래 걸리거나 멈춘 것 같으면 '취소' 라고 보내면 즉시 중단합니다."
 )
 
 # 링크당 카드 선택 후보 개수 (2~3)
@@ -414,21 +417,18 @@ def handle_card(tg: TelegramClient, chat_id: int, content: str):
     _advance(tg, chat_id)
 
 
-def _try_resolve_selection(tg: TelegramClient, chat_id: int, text: str) -> bool:
-    """대기 중인 후보 선택에 대한 답장이면 처리하고 True, 아니면 False."""
+def _resolve_selection_work(tg, chat_id: int, text: str):
+    """후보 선택 숫자 답장을 워커에서 처리 — 선택한 헤드라인으로 카드 생성."""
     state = PENDING_CARD.get(chat_id)
     if not state or not state.get("options"):
-        return False
-
-    m = re.match(r"\s*([1-9])", text.strip())
+        return
     options = state["options"]
+    m = re.match(r"\s*([1-9])", text.strip())
     if not m or int(m.group(1)) > len(options):
-        return False
-
+        tg.send_message(chat_id, f"1~{len(options)} 중에서 숫자로 골라주세요.")
+        return
     chosen = options[int(m.group(1)) - 1]
-    art = state["article"]
-    _finish_link(tg, chat_id, chosen, art, state)
-    return True
+    _finish_link(tg, chat_id, chosen, state["article"], state)
 
 
 # ── 메인 루프 ────────────────────────────────────────────
@@ -445,6 +445,82 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_expand(tg, chat_id, content)
     else:
         tg.send_message(chat_id, HELP_TEXT)
+
+
+# ── 백그라운드 처리 + 취소 ────────────────────────────────
+# 무거운 작업(공고 분석/카드 생성/카페 게시)을 워커 스레드로 돌려서,
+# 처리 중에도 봇이 '취소' 메시지를 받아 멈출 수 있게 한다.
+
+class _Cancelled(Exception):
+    """작업이 취소됨 — 워커를 조용히 중단시키는 신호."""
+
+
+class _CancelTG:
+    """텔레그램 전송 직전마다 취소 여부를 확인하는 래퍼.
+    취소되면 다음 전송 지점에서 _Cancelled 를 던져 작업을 중단시킨다."""
+
+    def __init__(self, tg, cancel_event):
+        self._tg = tg
+        self._cancel = cancel_event
+
+    def _check(self):
+        if self._cancel.is_set():
+            raise _Cancelled()
+
+    def send_message(self, *a, **k):
+        self._check()
+        return self._tg.send_message(*a, **k)
+
+    def send_photo(self, *a, **k):
+        self._check()
+        return self._tg.send_photo(*a, **k)
+
+    def download_file(self, *a, **k):
+        self._check()
+        return self._tg.download_file(*a, **k)
+
+
+WORK = {"thread": None, "cancel": None}
+
+
+def _work_busy() -> bool:
+    t = WORK.get("thread")
+    return t is not None and t.is_alive()
+
+
+def _start_work(tg, chat_id, target, *args):
+    """target(ctg, chat_id, *args) 를 워커 스레드에서 실행."""
+    cancel = threading.Event()
+    ctg = _CancelTG(tg, cancel)
+
+    def _run():
+        try:
+            target(ctg, chat_id, *args)
+        except _Cancelled:
+            print("[main] 작업이 사용자 요청으로 취소되었습니다.")
+        except Exception as e:
+            traceback.print_exc()
+            try:
+                tg.send_message(chat_id, f"❌ 처리 중 오류: {e}")
+            except Exception:
+                pass
+
+    th = threading.Thread(target=_run, daemon=True)
+    WORK["thread"] = th
+    WORK["cancel"] = cancel
+    th.start()
+
+
+def _cancel_current(tg, chat_id):
+    busy = _work_busy()
+    if busy and WORK.get("cancel"):
+        WORK["cancel"].set()          # 워커에게 중단 신호
+    WORK["thread"] = None             # 슬롯을 즉시 비워 새 작업을 바로 받을 수 있게
+    PENDING_CARD.pop(chat_id, None)
+    if busy:
+        tg.send_message(chat_id, "🛑 진행 중이던 작업을 멈췄어요. 새로 시작하셔도 됩니다.")
+    else:
+        tg.send_message(chat_id, "멈출 작업이 없어요. (이미 끝났거나 대기 중)")
 
 
 def main():
@@ -494,14 +570,31 @@ def main():
                 continue
             print(f"[main] 메시지 수신 chat_id={chat_id}")
             try:
-                # 카드 후보 선택 대기 중이면 숫자 답장인지 먼저 확인
-                if chat_id in PENDING_CARD and _try_resolve_selection(tg, chat_id, text):
+                mode0, _rest = detect_mode(text)
+
+                # '취소'/'중지' — 처리 중에도 항상 즉시 반응 (봇이 안 멈춰있도록)
+                if mode0 == "cancel":
+                    _cancel_current(tg, chat_id)
                     continue
+
+                # 다른 작업이 도는 중이면 새 요청은 막고 안내
+                if _work_busy():
+                    tg.send_message(chat_id, "⏳ 지금 앞의 작업을 처리하고 있어요.\n"
+                                             "멈추려면 '취소' 라고 보내주세요.")
+                    continue
+
+                # 카드 후보 선택 대기 중 — 숫자 답장이면 그 카드로 진행(워커에서)
                 if chat_id in PENDING_CARD and PENDING_CARD[chat_id].get("options"):
-                    tg.send_message(chat_id, "⚠️ 진행 중이던 선택은 취소하고 새 요청을 처리할게요. "
-                                             "(후보를 고르려면 숫자만 답장해주세요)")
-                    PENDING_CARD.pop(chat_id, None)
-                handle_message(tg, chat_id, text)
+                    if re.match(r"\s*[1-9]", text):
+                        _start_work(tg, chat_id, _resolve_selection_work, text)
+                    else:
+                        PENDING_CARD.pop(chat_id, None)
+                        tg.send_message(chat_id, "⚠️ 진행 중이던 선택은 취소하고 새 요청을 처리할게요. "
+                                                 "(후보를 고르려면 숫자만 답장해주세요)")
+                        _start_work(tg, chat_id, handle_message, text)
+                    continue
+
+                _start_work(tg, chat_id, handle_message, text)
             except Exception as e:
                 traceback.print_exc()
                 try:
@@ -509,23 +602,19 @@ def main():
                 except Exception:
                     pass
 
-        # 모아둔 사진 앨범 처리 — '채용' 캡션이면 공고 사진으로 분석
+        # 모아둔 사진 앨범 처리 — '채용' 캡션이면 공고 사진으로 분석 (워커에서)
         for g in photo_groups.values():
             cid = g["chat_id"]
             print(f"[main] 사진 {len(g['file_ids'])}장 수신 chat_id={cid}")
-            try:
-                mode, rest = detect_mode(g["caption"])
-                if mode == "job":
-                    handle_job_photos(tg, cid, rest, g["file_ids"])
-                else:
-                    tg.send_message(cid, "🖼 사진을 받았어요. 채용공고 캡처라면 사진에 "
-                                         "'채용' 이라는 캡션(설명)을 달아서 다시 보내주세요.")
-            except Exception as e:
-                traceback.print_exc()
-                try:
-                    tg.send_message(cid, f"❌ 사진 처리 중 오류: {e}")
-                except Exception:
-                    pass
+            if _work_busy():
+                tg.send_message(cid, "⏳ 지금 앞의 작업을 처리하고 있어요. 멈추려면 '취소' 라고 보내주세요.")
+                continue
+            mode, rest = detect_mode(g["caption"])
+            if mode == "job":
+                _start_work(tg, cid, handle_job_photos, rest, g["file_ids"])
+            else:
+                tg.send_message(cid, "🖼 사진을 받았어요. 채용공고 캡처라면 사진에 "
+                                     "'채용' 이라는 캡션(설명)을 달아서 다시 보내주세요.")
 
 
 if __name__ == "__main__":

@@ -14,14 +14,17 @@ CAFE_WORDS = ("카페", "cafe", "글")
 CARD_WORDS = ("카드", "card", "카드뉴스")
 JOB_WORDS = ("채용", "채용공고", "job")
 EXPAND_WORDS = ("펼치기", "펼침", "링크펼치기", "expand")
+CANCEL_WORDS = ("취소", "중지", "정지", "그만", "stop", "cancel")
 
 
 def detect_mode(text: str):
-    """returns (mode, rest_text). mode ∈ {'cafe','card','job','expand',None}"""
+    """returns (mode, rest_text). mode ∈ {'cafe','card','job','expand','cancel',None}"""
     stripped = (text or "").lstrip()
     # 첫 토큰(공백/줄바꿈/콜론 전까지)
     head = re.split(r"[\s:：]", stripped, 1)[0].lower()
     rest = stripped[len(head):].lstrip(" :：\n\t")
+    if head in CANCEL_WORDS:
+        return "cancel", rest
     if head in CAFE_WORDS:
         return "cafe", rest
     if head in CARD_WORDS:
