@@ -127,58 +127,24 @@ def fetch_article(url: str) -> dict:
     }
 
 
-def _capture(page):
-    """화면 캡처 — 전체 페이지가 실패하면(사이트가 브라우저를 닫는 등) 보이는 영역만이라도.
-    캡처마다 8초 타임아웃을 둬서 무한정 매달리지 않게 한다."""
-    for full in (True, False):
-        try:
-            raw = page.screenshot(full_page=full, type="jpeg", quality=80, timeout=8000)
-            kind = "전체" if full else "보이는 영역"
-            print(f"[article] {kind} 화면 캡처 성공 ({len(raw)} bytes)")
-            return _shrink_screenshot(raw)
-        except Exception as e:
-            print(f"[article] {'전체' if full else '보이는 영역'} 캡처 실패: {e}")
-    return None
-
-
-def _shrink_screenshot(raw: bytes) -> bytes:
-    """전체 화면 캡처가 너무 크면 AI 업로드가 수십 분씩 걸리며 멈춘 것처럼 보인다.
-    가로 900px, 세로 최대 6000px 로 줄이고 JPEG 재압축해 크기를 확실히 제한한다."""
-    import io
-
-    from PIL import Image
-
-    try:
-        img = Image.open(io.BytesIO(raw)).convert("RGB")
-        if img.width > 900:
-            img = img.resize((900, round(img.height * 900 / img.width)), Image.LANCZOS)
-        if img.height > 6000:   # 그 아래는 푸터/약관인 경우가 대부분
-            img = img.crop((0, 0, img.width, 6000))
-        buf = io.BytesIO()
-        img.save(buf, "JPEG", quality=72)
-        out = buf.getvalue()
-        print(f"[article] 캡처 축소: {len(raw)} → {len(out)} bytes ({img.width}x{img.height})")
-        return out
-    except Exception as e:
-        print(f"[article] 캡처 축소 실패(원본 사용): {e}")
-        return raw
-
-
 def _rendered_page_text(url: str):
     """자바스크립트로만 그려지는 페이지 폴백 — 진짜 브라우저(Playwright)로 열어서
-    렌더링이 끝난 뒤의 텍스트를 수집한다. returns (title, text, screenshot|None)
+    렌더링이 끝난 뒤의 텍스트를 수집한다. returns (title, text)
+
+    화면 캡처는 하지 않는다 — 안티봇 회피(빨리 캡처)와 지연 로딩 콘텐츠 확보(스크롤 후
+    캡처)가 서로 충돌해서 불안정했고, 텍스트가 부실한 공고는 사용자가 직접 화면을
+    캡처해서 '채용' 과 함께(또는 이어서) 사진으로 보내는 방식이 훨씬 안정적이다.
 
     - iframe 안쪽 문서까지 전부 뒤져서 텍스트를 모은다 (채용 사이트가 상세 내용을
       iframe 에 넣는 경우가 많음)
-    - 그래도 텍스트가 거의 없으면(공고가 이미지인 경우) 페이지 전체 스크린샷을
-      찍어서 반환 — AI 비전으로 이미지를 직접 읽게 한다
+    - 스크롤을 여러 단계로 나눠 내려가며 지연 로딩 콘텐츠가 그려질 시간을 준다
     - playwright 미설치면 빈 값 반환. 설치:  pip install playwright → playwright install chromium"""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         print("[article] playwright 미설치 — 브라우저 렌더링 폴백 생략")
-        return "", "", None
-    title, text, early_shot = "", "", None
+        return "", ""
+    title, text = "", ""
     try:
         with sync_playwright() as pw:
             # 안티봇/크래시 완화 옵션 + 헤드리스 티 줄이기
@@ -190,21 +156,20 @@ def _rendered_page_text(url: str):
                                     viewport={"width": 1080, "height": 1600})
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(3500)   # 스크립트가 내용을 그릴 시간
-
-                # ⚡ 텍스트 추출·스크롤 전에 '먼저' 캡처 — 안티봇이 페이지를 닫기 전에 확보
+                page.wait_for_timeout(2500)   # 스크립트가 내용을 그릴 시간
                 try:
                     title = page.title() or ""
                 except Exception:
                     title = ""
-                early_shot = _capture(page)
 
-                # 이후 텍스트 수집 (실패해도 early_shot 은 이미 확보됨)
+                # 지연 로딩(스크롤해야 그려지는) 섹션을 위해 여러 단계로 나눠 내려간다
                 try:
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    page.wait_for_timeout(1200)
+                    for _ in range(6):
+                        page.evaluate("window.scrollBy(0, window.innerHeight * 0.85)")
+                        page.wait_for_timeout(500)
                 except Exception:
                     pass
+
                 texts = []
                 for frame in page.frames:   # 메인 문서 + 모든 iframe
                     try:
@@ -222,9 +187,6 @@ def _rendered_page_text(url: str):
     except Exception as e:
         print(f"[article] 브라우저 렌더링 실패({url}): {e}")
 
-    # 텍스트가 넉넉하면 캡처는 버리고, 부실하면 캡처(비전)를 쓴다
-    screenshot = early_shot if len(" ".join((text or "").split())) < 600 else None
-
     lines, prev = [], None
     for raw in (text or "").split("\n"):
         line = " ".join(raw.split())
@@ -232,7 +194,7 @@ def _rendered_page_text(url: str):
             continue
         prev = line
         lines.append(line)
-    return title, "\n".join(lines)[:9000], screenshot
+    return title, "\n".join(lines)[:9000]
 
 
 def fetch_job_page(url: str) -> dict:
@@ -277,17 +239,14 @@ def fetch_job_page(url: str) -> dict:
     text = "\n".join(lines)[:9000]
 
     # 내용이 부실하면 자바스크립트 렌더링 페이지로 보고 실제 브라우저로 재시도.
-    # 채용공고는 상세를 이미지로 올리는 경우가 많아, 텍스트가 넉넉히 안 나오면
-    # 전체 화면 캡처를 확보해 AI 비전으로 읽게 한다 (임계값을 넉넉히 600자로).
-    screenshot = None
+    # 그래도 부실하면(공고가 이미지이거나 안티봇 사이트) 화면 캡처는 하지 않고,
+    # 호출 측에서 사용자에게 직접 사진으로 보내달라고 안내한다 (더 안정적).
     if len(text) < 600:
-        r_title, r_text, screenshot = _rendered_page_text(url)
+        r_title, r_text = _rendered_page_text(url)
         if len(r_text) > len(text):
             print(f"[article] 브라우저 렌더링으로 {len(r_text)}자 수집 (일반 방식: {len(text)}자)")
             text = r_text
             title = title or r_title
-        if len(text) >= 600:
-            screenshot = None   # 텍스트를 충분히 얻었으면 캡처는 불필요
 
     return {
         "url": url,
@@ -297,7 +256,6 @@ def fetch_job_page(url: str) -> dict:
         "text": text,
         "logo_url": logo_url,      # link rel 아이콘 (있으면 우선)
         "og_image_url": og_image,  # og:image — 채용 사이트에선 보통 회사 로고
-        "screenshot": screenshot,  # 텍스트를 못 읽었을 때의 전체 화면 캡처 (jpeg bytes)
     }
 
 
