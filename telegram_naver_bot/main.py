@@ -42,9 +42,14 @@ class _Tee:
 
     def write(self, data):
         self.stream.write(data)
+        try:
+            self.stream.flush()   # 버퍼링 때문에 터미널에 실시간으로 안 뜨는 문제 방지
+        except Exception:
+            pass
         if self.logfile:
             try:
                 self.logfile.write(data)
+                self.logfile.flush()
             except Exception:
                 pass
 
