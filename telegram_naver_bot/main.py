@@ -92,12 +92,16 @@ HELP_TEXT = (
     "  ▸ 가장 추천: 공고 내용을 복사(Ctrl+A, Ctrl+C)해서 '채용' 뒤에 붙여넣고,\n"
     "    마지막 줄에 지원 링크도 함께 넣으세요 — 본문으로 카드를 만들고,\n"
     "    링크는 '공고 원문' 참고용으로만 씁니다 (AI 사용량 절약, 안티봇 회피).\n"
+    "    표나 이미지로만 된 부분이 있으면, 텍스트 보낸 뒤 이어서 사진을 보내면\n"
+    "    (캡션 없이 그냥 사진만) 합쳐서 반영합니다. 15초 안에 안 보내면\n"
+    "    자동으로 진행하고, 바로 진행하려면 '완료' 라고 보내세요.\n"
     "  ▸ 링크만 있어도 자동으로 읽어보긴 하지만, 사이트에 따라 안 될 수 있어요.\n"
     "  ▸ 그래도 안 되면: 공고 화면을 캡처해서 '채용' 캡션과 함께 사진으로 (여러 장 가능)\n"
     "  예)\n"
     "  채용\n"
     "  (공고 내용 전체 붙여넣기)\n"
-    "  https://recruit.../apply\n\n"
+    "  https://recruit.../apply\n"
+    "  → (필요하면 이어서 사진 전송) → '완료' (또는 자동 진행)\n\n"
     "🔗 단축주소 펼치기:\n"
     "  첫 줄에 '펼치기' 라고 쓰고, 단축주소(buly.kr 등)가 든 글을 넣으면\n"
     "  원본 주소로 펼친 전체 글을 그대로 돌려드립니다.\n\n"
@@ -112,6 +116,19 @@ N_OPTIONS = max(2, min(3, config.MAX_CARDS_PER_LINK or 3))
 # {chat_id: {"queue": [url, ...], "link_idx": int, "made": int, "stamp": int,
 #            "article": dict|None, "options": list|None, "extras": dict|None}}
 PENDING_CARD: dict = {}
+
+# 채용공고: 텍스트를 먼저 받고 "이어서 사진 보내주세요" 하며 잠깐 기다리는 상태.
+# {chat_id: {"text", "link", "images": [...], "photo_paths": [...],
+#            "created": float, "timer": threading.Timer|None, "extensions": int}}
+PENDING_JOB: dict = {}
+_pending_job_lock = threading.Lock()
+
+JOB_WAIT_SECONDS = 15     # 텍스트만 온 뒤 이미지를 기다리는 시간(초)
+JOB_WAIT_EXTEND = 10      # 이미지가 오면 추가로 더 기다려주는 시간(초)
+JOB_MAX_EXTENSIONS = 3    # 이미지 배치를 몇 번까지 더 기다려줄지
+JOB_MAX_WAIT = 60         # 첫 텍스트 이후 최대 총 대기 시간(초)
+
+RAW_TG = None   # main() 에서 설정 — 타이머 콜백 등 워커 밖에서 쓸 원본 텔레그램 클라이언트
 
 
 # ── 카페 글 게시 ─────────────────────────────────────────
@@ -232,17 +249,155 @@ def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int,
         tg.send_message(chat_id, f"⚠️ 카페 게시 실패: {e}")
 
 
+def _download_photos(tg, file_ids: list, stamp: int):
+    """사진들을 내려받아 (AI 비전용 base64 목록, 카페 첨부용 원본 파일 경로 목록)을 반환."""
+    import base64
+
+    config.CARDS_DIR.mkdir(parents=True, exist_ok=True)
+    images, photo_paths = [], []
+    for n, fid in enumerate(file_ids[:5], 1):
+        try:
+            raw = tg.download_file(fid)
+            images.append(("image/jpeg", base64.b64encode(raw).decode()))
+            p = config.CARDS_DIR / f"job_src_{stamp}_{n}.jpg"   # 카페 첨부용 원본 보관
+            p.write_bytes(raw)
+            photo_paths.append(p)
+        except Exception as e:
+            print(f"[main] 사진 다운로드 실패: {e}")
+    return images, photo_paths
+
+
+def _run_finalize_job(tg, chat_id, text: str, link: str, images: list, photo_paths: list):
+    """모아둔 텍스트(+이미지)로 실제 카드 생성/카페 게시를 진행."""
+    tg.send_message(chat_id, "⏳ 채용공고 분석 중...")
+    page = {"url": link or "", "title": "", "description": "", "text": text[:9000]}
+    _handle_one_job(tg, chat_id, page, 1, images=images or None, photo_paths=photo_paths or None)
+
+
+def _cancel_pending_job(chat_id):
+    """대기 중인 채용공고 큐를 취소하고, 있었으면 그 상태를 반환."""
+    with _pending_job_lock:
+        state = PENDING_JOB.pop(chat_id, None)
+    if state and state.get("timer"):
+        try:
+            state["timer"].cancel()
+        except Exception:
+            pass
+    return state
+
+
+def _on_job_timer_fire(chat_id):
+    """대기 시간이 끝났을 때 호출 — 지금까지 모인 내용으로 진행."""
+    with _pending_job_lock:
+        state = PENDING_JOB.pop(chat_id, None)
+    if state is None:
+        return   # 이미 취소됐거나 '완료'로 먼저 처리됨
+    if _work_busy():
+        # 다른 작업이 도는 중이면 잠깐 후 재시도
+        with _pending_job_lock:
+            PENDING_JOB[chat_id] = state
+        retry = threading.Timer(3.0, _on_job_timer_fire, args=(chat_id,))
+        retry.daemon = True
+        state["timer"] = retry
+        retry.start()
+        return
+    _start_work(RAW_TG, chat_id, _run_finalize_job,
+               state["text"], state["link"], state["images"], state["photo_paths"])
+
+
+def _queue_job_text(tg, chat_id, text: str, link: str):
+    """공고 텍스트를 받으면 바로 만들지 않고, 이어서 올 사진을 잠깐 기다린다."""
+    prev = _cancel_pending_job(chat_id)
+    if prev:
+        tg.send_message(chat_id, "⚠️ 대기 중이던 이전 채용공고 요청은 취소하고 새 내용으로 진행할게요.")
+
+    with _pending_job_lock:
+        PENDING_JOB[chat_id] = {"text": text, "link": link, "images": [], "photo_paths": [],
+                                "created": time.time(), "timer": None, "extensions": 0}
+    timer = threading.Timer(JOB_WAIT_SECONDS, _on_job_timer_fire, args=(chat_id,))
+    timer.daemon = True
+    with _pending_job_lock:
+        if chat_id in PENDING_JOB:
+            PENDING_JOB[chat_id]["timer"] = timer
+    timer.start()
+    tg.send_message(chat_id,
+                    "✅ 텍스트 확인했어요. 표나 이미지로만 된 부분이 있으면 이어서 사진으로 보내주세요.\n"
+                    f"{JOB_WAIT_SECONDS}초 안에 안 오면 자동으로 진행할게요. "
+                    "(바로 진행하려면 '완료' 라고 보내주세요)")
+
+
+def _append_pending_job_photos(tg, chat_id, file_ids: list):
+    """대기 중인 채용공고에 이어서 온 사진을 추가하고, 대기 시간을 조금 더 늘린다."""
+    with _pending_job_lock:
+        exists = chat_id in PENDING_JOB
+    if not exists:
+        tg.send_message(chat_id, "ℹ️ 대기 중인 채용공고가 없어요. 먼저 '채용' + 내용을 보내주세요.")
+        return
+
+    new_images, new_paths = _download_photos(tg, file_ids, int(time.time()))
+    if not new_images:
+        tg.send_message(chat_id, "⚠️ 사진을 내려받지 못했어요. 다시 보내주세요.")
+        return
+
+    with _pending_job_lock:
+        state = PENDING_JOB.get(chat_id)
+        if state is None:
+            state = None
+        else:
+            if state.get("timer"):
+                try:
+                    state["timer"].cancel()
+                except Exception:
+                    pass
+            state["images"].extend(new_images)
+            state["photo_paths"].extend(new_paths)
+            state["extensions"] += 1
+    if state is None:
+        tg.send_message(chat_id, "ℹ️ 이미 처리가 진행돼서 이 사진은 반영하지 못했어요.")
+        return
+
+    elapsed = time.time() - state["created"]
+    if state["extensions"] > JOB_MAX_EXTENSIONS or elapsed > JOB_MAX_WAIT:
+        with _pending_job_lock:
+            PENDING_JOB.pop(chat_id, None)
+        tg.send_message(chat_id, f"🖼 이미지 {len(new_images)}장 받았어요. 바로 반영해서 만들게요.")
+        _run_finalize_job(tg, chat_id, state["text"], state["link"],
+                          state["images"], state["photo_paths"])
+        return
+
+    timer = threading.Timer(JOB_WAIT_EXTEND, _on_job_timer_fire, args=(chat_id,))
+    timer.daemon = True
+    with _pending_job_lock:
+        if chat_id in PENDING_JOB:
+            PENDING_JOB[chat_id]["timer"] = timer
+    timer.start()
+    tg.send_message(chat_id,
+                    f"🖼 이미지 {len(new_images)}장 추가로 받았어요. {JOB_WAIT_EXTEND}초 더 기다렸다가 반영할게요.\n"
+                    "(더 없으면 '완료' 라고 보내면 바로 진행해요)")
+
+
+def _finish_pending_job_now(tg, chat_id):
+    """'완료' 명령 — 대기 중인 채용공고를 기다리지 않고 바로 진행."""
+    state = _cancel_pending_job(chat_id)
+    if state is None:
+        tg.send_message(chat_id, "대기 중인 채용공고가 없어요.")
+        return
+    if _work_busy():
+        tg.send_message(chat_id, "⏳ 지금 다른 작업 중이라 완료 요청을 반영하지 못했어요. 잠시 후 다시 시도해주세요.")
+        return
+    _start_work(tg, chat_id, _run_finalize_job,
+               state["text"], state["link"], state["images"], state["photo_paths"])
+
+
 def handle_job(tg: TelegramClient, chat_id: int, content: str):
     links = extract_links(content)[: config.MAX_LINKS]
 
     # 링크와 함께 공고 본문도 넉넉히 붙여넣은 경우 — 본문으로 카드를 만들고,
-    # 링크는 fetch/캡처 없이 '공고 원문' 참고용으로만 사용 (토큰 절약 + 안티봇 회피)
+    # 링크는 fetch/캡처 없이 '공고 원문' 참고용으로만 사용 (토큰 절약 + 안티봇 회피).
+    # 표/이미지로만 된 부분이 있을 수 있으니, 곧바로 만들지 않고 이어서 올 사진을 잠깐 기다린다.
     text_without_links = URL_RE.sub("", content).strip()
     if links and len(text_without_links) >= 80:
-        tg.send_message(chat_id, "⏳ 붙여넣은 채용공고 내용 분석 중... (링크는 원문 참고용으로만 사용)")
-        page = {"url": links[0], "title": "", "description": "",
-                "text": text_without_links[:9000]}
-        _handle_one_job(tg, chat_id, page, 1)
+        _queue_job_text(tg, chat_id, text_without_links, links[0])
         return
 
     if links:
@@ -283,11 +438,9 @@ def handle_job(tg: TelegramClient, chat_id: int, content: str):
                 tg.send_message(chat_id, f"⚠️ 채용공고 {i} 처리 실패: {e}")
         return
 
-    # 링크 없이 공고 본문을 직접 붙여넣은 경우
+    # 링크 없이 공고 본문을 직접 붙여넣은 경우 — 마찬가지로 이어서 올 사진을 잠깐 기다린다.
     if len(content.strip()) >= 80:
-        tg.send_message(chat_id, "⏳ 붙여넣은 채용공고 내용 분석 중...")
-        page = {"url": "", "title": "", "description": "", "text": content.strip()[:9000]}
-        _handle_one_job(tg, chat_id, page, 1)
+        _queue_job_text(tg, chat_id, content.strip(), "")
         return
 
     tg.send_message(chat_id, "⚠️ '채용' 아래에 채용공고 링크(또는 공고 내용 전체)를 함께 보내주세요.\n"
@@ -297,21 +450,8 @@ def handle_job(tg: TelegramClient, chat_id: int, content: str):
 
 def handle_job_photos(tg: TelegramClient, chat_id: int, caption_rest: str, file_ids: list):
     """캡처 사진으로 받은 채용공고 — AI 비전으로 이미지에서 직접 추출."""
-    import base64
-
     tg.send_message(chat_id, f"⏳ 공고 사진 {len(file_ids)}장 분석 중...")
-    config.CARDS_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = int(time.time())
-    images, photo_paths = [], []
-    for n, fid in enumerate(file_ids[:5], 1):
-        try:
-            raw = tg.download_file(fid)
-            images.append(("image/jpeg", base64.b64encode(raw).decode()))
-            p = config.CARDS_DIR / f"job_src_{stamp}_{n}.jpg"   # 카페 첨부용 원본 보관
-            p.write_bytes(raw)
-            photo_paths.append(p)
-        except Exception as e:
-            print(f"[main] 사진 다운로드 실패: {e}")
+    images, photo_paths = _download_photos(tg, file_ids, int(time.time()))
     if not images:
         tg.send_message(chat_id, "⚠️ 사진을 내려받지 못했어요. 다시 보내주세요.")
         return
@@ -529,8 +669,11 @@ def _cancel_current(tg, chat_id):
         WORK["cancel"].set()          # 워커에게 중단 신호
     WORK["thread"] = None             # 슬롯을 즉시 비워 새 작업을 바로 받을 수 있게
     PENDING_CARD.pop(chat_id, None)
+    had_pending_job = _cancel_pending_job(chat_id) is not None
     if busy:
         tg.send_message(chat_id, "🛑 진행 중이던 작업을 멈췄어요. 새로 시작하셔도 됩니다.")
+    elif had_pending_job:
+        tg.send_message(chat_id, "🛑 대기 중이던 채용공고 요청을 취소했어요.")
     else:
         tg.send_message(chat_id, "멈출 작업이 없어요. (이미 끝났거나 대기 중)")
 
@@ -542,7 +685,9 @@ def main():
         print("⚠️ TELEGRAM_ALLOWED_CHAT_IDS 가 비어 있어 모든 채팅을 허용합니다. "
               "봇에게 아무 메시지나 보내면 chat_id 가 로그에 출력되니 그 값을 .env 에 넣으세요.")
 
+    global RAW_TG
     tg = TelegramClient(config.TELEGRAM_BOT_TOKEN)
+    RAW_TG = tg
     offset = None
     print("🤖 봇 시작 — 텔레그램 메시지를 기다립니다...")
 
@@ -589,6 +734,11 @@ def main():
                     _cancel_current(tg, chat_id)
                     continue
 
+                # '완료' — 채용공고 사진을 기다리는 중이면 기다리지 않고 바로 진행
+                if mode0 == "finish":
+                    _finish_pending_job_now(tg, chat_id)
+                    continue
+
                 # 다른 작업이 도는 중이면 새 요청은 막고 안내
                 if _work_busy():
                     tg.send_message(chat_id, "⏳ 지금 앞의 작업을 처리하고 있어요.\n"
@@ -624,6 +774,9 @@ def main():
             mode, rest = detect_mode(g["caption"])
             if mode == "job":
                 _start_work(tg, cid, handle_job_photos, rest, g["file_ids"])
+            elif cid in PENDING_JOB:
+                # 방금 보낸 채용공고 텍스트를 이어서 보충하는 사진 (캡션 없이 보내도 됨)
+                _start_work(tg, cid, _append_pending_job_photos, g["file_ids"])
             else:
                 tg.send_message(cid, "🖼 사진을 받았어요. 채용공고 캡처라면 사진에 "
                                      "'채용' 이라는 캡션(설명)을 달아서 다시 보내주세요.")

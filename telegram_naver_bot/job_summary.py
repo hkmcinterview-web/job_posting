@@ -25,10 +25,16 @@ _FIELD_RE = re.compile(r"^\s*(COMPANY|TITLE|DEADLINE|BADGE|TABLE_HEAD|TABLE_ROW|
 
 
 def _build_prompt(page: dict, with_images: bool = False) -> str:
+    has_text = len((page.get("text") or "").strip()) >= 30
     intro = ("다음은 기업 채용공고 내용입니다. 이걸로 SNS용 '채용공고 카드' 이미지 1장과\n"
              "네이버 카페 게시글을 만들 겁니다. 아래 마커 형식을 정확히 지켜 출력하세요.\n"
              "다른 인사말/설명 없이 형식만 출력합니다.\n\n")
-    if with_images:
+    if with_images and has_text:
+        intro = ("아래 [페이지 내용]은 채용공고 본문이고, 첨부한 이미지는 같은 공고를 보충하는\n"
+                 "캡처(표/이미지로만 된 부분 등)입니다. 텍스트와 이미지를 함께 참고해서 빠짐없이\n"
+                 "SNS용 '채용공고 카드'와 네이버 카페 게시글용으로 아래 마커 형식에 맞춰 추출하세요.\n"
+                 "다른 인사말/설명 없이 형식만 출력합니다.\n\n")
+    elif with_images:
         intro = ("첨부한 이미지는 기업 채용공고를 캡처한 것입니다. 이미지 속 내용을 꼼꼼히 읽고,\n"
                  "SNS용 '채용공고 카드'와 네이버 카페 게시글용으로 아래 마커 형식에 맞춰 추출하세요.\n"
                  "다른 인사말/설명 없이 형식만 출력합니다.\n\n")
