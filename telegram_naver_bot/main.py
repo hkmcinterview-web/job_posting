@@ -700,6 +700,14 @@ def main():
             time.sleep(5)
             continue
 
+        if updates:
+            print(f"[main] getUpdates 로 {len(updates)}개 수신")
+        for upd in updates:
+            msg_dbg = upd.get("message") or {}
+            kinds = [k for k in ("text", "photo", "document", "caption") if k in msg_dbg]
+            print(f"[main] RAW update_id={upd.get('update_id')} 필드={kinds} "
+                 f"mime={(msg_dbg.get('document') or {}).get('mime_type')}")
+
         # 같은 배치 안의 사진 앨범(media_group)을 하나로 묶는다
         photo_groups = {}   # group_key -> {"chat_id", "caption", "file_ids"}
 
