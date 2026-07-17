@@ -4,3 +4,4 @@ cards/
 fonts/
 __pycache__/
 *.pyc
+bot.log
