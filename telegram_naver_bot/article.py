@@ -127,6 +127,20 @@ def fetch_article(url: str) -> dict:
     }
 
 
+def _capture(page):
+    """화면 캡처 — 전체 페이지가 실패하면(사이트가 브라우저를 닫는 등) 보이는 영역만이라도.
+    캡처마다 8초 타임아웃을 둬서 무한정 매달리지 않게 한다."""
+    for full in (True, False):
+        try:
+            raw = page.screenshot(full_page=full, type="jpeg", quality=80, timeout=8000)
+            kind = "전체" if full else "보이는 영역"
+            print(f"[article] {kind} 화면 캡처 성공 ({len(raw)} bytes)")
+            return _shrink_screenshot(raw)
+        except Exception as e:
+            print(f"[article] {'전체' if full else '보이는 영역'} 캡처 실패: {e}")
+    return None
+
+
 def _shrink_screenshot(raw: bytes) -> bytes:
     """전체 화면 캡처가 너무 크면 AI 업로드가 수십 분씩 걸리며 멈춘 것처럼 보인다.
     가로 900px, 세로 최대 6000px 로 줄이고 JPEG 재압축해 크기를 확실히 제한한다."""
@@ -164,20 +178,26 @@ def _rendered_page_text(url: str):
     except ImportError:
         print("[article] playwright 미설치 — 브라우저 렌더링 폴백 생략")
         return "", "", None
-    screenshot = None
+    title, text, screenshot = "", "", None
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
-            page = browser.new_page(user_agent=HEADERS["User-Agent"])
+            page = browser.new_page(user_agent=HEADERS["User-Agent"],
+                                    viewport={"width": 1080, "height": 1600})
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(3000)   # 스크립트가 내용을 그릴 시간
-                try:  # 지연 로딩 대비 스크롤
+                try:  # 지연 로딩 대비 스크롤 후 맨 위로 복귀
                     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(1500)
+                    page.evaluate("window.scrollTo(0, 0)")
                 except Exception:
                     pass
-                page.wait_for_timeout(2500)
-                title = page.title() or ""
+                page.wait_for_timeout(1000)
+                try:
+                    title = page.title() or ""
+                except Exception:
+                    title = ""
                 texts = []
                 for frame in page.frames:   # 메인 문서 + 모든 iframe
                     try:
@@ -188,18 +208,14 @@ def _rendered_page_text(url: str):
                         pass
                 text = "\n".join(texts)
                 if len(" ".join(text.split())) < 600:
-                    try:  # 텍스트가 부실 → 상세가 이미지일 가능성, 화면을 통째로 캡처
-                        page.evaluate("window.scrollTo(0, 0)")
-                        screenshot = page.screenshot(full_page=True, type="jpeg", quality=80)
-                        print(f"[article] 텍스트가 부족해 전체 화면 캡처 ({len(screenshot)} bytes)")
-                        screenshot = _shrink_screenshot(screenshot)
-                    except Exception as e:
-                        print(f"[article] 화면 캡처 실패: {e}")
+                    screenshot = _capture(page)   # 텍스트 부실 → 화면 캡처(비전용)
             finally:
-                browser.close()
+                try:
+                    browser.close()
+                except Exception:
+                    pass
     except Exception as e:
         print(f"[article] 브라우저 렌더링 실패({url}): {e}")
-        return "", "", None
 
     lines, prev = [], None
     for raw in (text or "").split("\n"):
