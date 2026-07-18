@@ -347,30 +347,67 @@ def _content_bg(background: Image.Image) -> Image.Image:
     return img
 
 
-_NUM_RE = re.compile(r"(?<![A-Za-z가-힣0-9])\d[\d,.]*\s*(?:%|만원|억원|조원|원|억|조|km|kg|kWh|GWh|년|월|일|명|개|대|위|배|차)?")
+_HL_RE = re.compile(r"\{\{(.+?)\}\}")
 
 
-def _draw_line_rich(draw, x, y, line, font, fill):
-    """한 줄을 그리되 숫자/금액/단위는 노란색으로 자동 강조 — 사람 손맛 포인트."""
-    pos = 0
-    for m in _NUM_RE.finditer(line):
-        pre = line[pos:m.start()]
-        if pre:
-            draw.text((x, y), pre, font=font, fill=fill)
-            x += draw.textlength(pre, font=font)
-        draw.text((x, y), m.group(0), font=font, fill=HILITE)
-        x += draw.textlength(m.group(0), font=font)
+def _extract_highlight_spans(text: str):
+    """{{...}} 마커를 제거한 평문과, 그 안에서 강조할 (start,end) 구간 목록을 반환.
+    AI 가 정말 중요하다고 고른 곳만(보통 1~2곳) 강조하기 위함 — 숫자 전체를
+    기계적으로 강조하던 이전 방식(_NUM_RE)을 대체."""
+    parts, spans, pos, offset = [], [], 0, 0
+    for m in _HL_RE.finditer(text or ""):
+        pre = text[pos:m.start()]
+        parts.append(pre)
+        offset += len(pre)
+        inner = m.group(1)
+        spans.append((offset, offset + len(inner)))
+        parts.append(inner)
+        offset += len(inner)
         pos = m.end()
-    rest = line[pos:]
-    if rest:
-        draw.text((x, y), rest, font=font, fill=fill)
+    parts.append(text[pos:])
+    return "".join(parts), spans
 
 
-def _draw_rich_wrapped(draw, x, y, text, font, max_width, gap, fill=WHITE, max_lines=12):
-    for line in _wrap(draw, text, font, max_width)[:max_lines]:
-        _draw_line_rich(draw, x, y, line, font, fill)
+def _wrap_keep(draw, text, font, max_width):
+    """오프셋을 보존하는 줄바꿈(문자 손실 없음) — 강조 구간을 줄 단위로 매핑하기 위함.
+    공백 근처에서 끊되, 그 공백은 버리지 않고 이번 줄 끝에 포함시킨다."""
+    lines, cur = [], ""
+    for ch in text:
+        if cur and draw.textlength(cur + ch, font=font) > max_width:
+            sp = cur.rfind(" ")
+            if sp > 0 and len(cur) - sp <= 14:
+                lines.append(cur[:sp + 1])
+                cur = cur[sp + 1:] + ch
+            else:
+                lines.append(cur)
+                cur = ch
+        else:
+            cur += ch
+    lines.append(cur)
+    return lines
+
+
+def _draw_marked_paragraph(draw, x, y, text, font, max_width, gap, max_lines=16):
+    """{{...}} 로 감싼 구간만 노란색으로, 나머지는 흰색으로 그리며 줄바꿈해서 그린다."""
+    plain, spans = _extract_highlight_spans(text)
+    lines = _wrap_keep(draw, plain, font, max_width)[:max_lines]
+    offset = 0
+    for line in lines:
+        s, e = offset, offset + len(line)
+        overlaps = sorted((max(a, s) - s, min(b, e) - s) for a, b in spans if max(a, s) < min(b, e))
+        cx, pos = x, 0
+        for a, b in overlaps:
+            if a > pos:
+                draw.text((cx, y), line[pos:a], font=font, fill=WHITE)
+                cx += draw.textlength(line[pos:a], font=font)
+            draw.text((cx, y), line[a:b], font=font, fill=HILITE)
+            cx += draw.textlength(line[a:b], font=font)
+            pos = b
+        if pos < len(line):
+            draw.text((cx, y), line[pos:], font=font, fill=WHITE)
         y += gap
-    return y
+        offset = e
+    return lines
 
 
 def _draw_panel(img: Image.Image, box, radius=22):
@@ -416,24 +453,21 @@ def _slide_summary(background, summary: str, page: int, source: str) -> Image.Im
     img, draw, y = _slide_frame(background, page, "핵심 요약", "한눈에 보는 핵심", source)
     # 문장들을 끊지 않고 하나의 흐르는 문단으로 합침
     text = " ".join(p.strip().lstrip("-•· ") for p in (summary or "").split("\n") if p.strip())
+    plain, _ = _extract_highlight_spans(text)
 
     pad = 42
     for size in (42, 40, 38, 36, 34, 32, 30):
         f = _font(True, size)
         gap = size + 20
         inner_w = W - MARGIN * 2 - pad * 2
-        lines = _wrap(draw, text, f, inner_w)
+        lines = _wrap_keep(draw, plain, f, inner_w)
         panel_h = pad * 2 + len(lines) * gap - 10
         if y + panel_h <= H - 160:
             break
-    lines = lines[:16]
 
     _draw_panel(img, [MARGIN, y, W - MARGIN, y + panel_h])
     draw = ImageDraw.Draw(img)
-    ty = y + pad
-    for line in lines:
-        _draw_line_rich(draw, MARGIN + pad, ty, line, f, WHITE)
-        ty += gap
+    _draw_marked_paragraph(draw, MARGIN + pad, y + pad, text, f, inner_w, gap, max_lines=16)
     return img.convert("RGB")
 
 
@@ -445,15 +479,16 @@ def _slide_bullets(background, items: list, page: int, source: str,
     gap, pad = 56, 34
     for i, item in enumerate(items[:3], 1):
         text = item.lstrip("-•· ").strip()
+        plain, _ = _extract_highlight_spans(text)
         inner_w = W - MARGIN * 2 - pad * 2 - 76
-        n = len(_wrap(draw, text, f, inner_w))
+        n = len(_wrap_keep(draw, plain, f, inner_w))
         ph = pad * 2 + n * gap - 12
         if y + ph > H - 170:
             break
         _draw_panel(img, [MARGIN, y, W - MARGIN, y + ph])
         draw = ImageDraw.Draw(img)
         # 번호 뱃지를 텍스트 '첫 줄'의 실제 글자 세로 중심에 맞춘다
-        first_line = _wrap(draw, text, f, inner_w)[0]
+        first_line = _wrap_keep(draw, plain, f, inner_w)[0]
         tx = MARGIN + pad + 76
         bbox = draw.textbbox((tx, y + pad), first_line, font=f)
         line_cy = (bbox[1] + bbox[3]) / 2
@@ -461,7 +496,7 @@ def _slide_bullets(background, items: list, page: int, source: str,
         draw.ellipse([MARGIN + pad, line_cy - r, MARGIN + pad + r * 2, line_cy + r], fill=HILITE)
         draw.text((MARGIN + pad + r, line_cy), str(i), font=_font(True, 32),
                   fill=DARK, anchor="mm")
-        _draw_rich_wrapped(draw, tx, y + pad, text, f, inner_w, gap)
+        _draw_marked_paragraph(draw, tx, y + pad, text, f, inner_w, gap, max_lines=2)
         y += ph + 26
     return img.convert("RGB")
 
@@ -470,26 +505,26 @@ def _slide_context(background, context: str, page: int, source: str) -> Image.Im
     """3장 — 배경/맥락을 이야기하듯 흐르는 문단으로. 좌측 노란 바 + 큰따옴표."""
     img, draw, y = _slide_frame(background, page, "배경 짚기", "왜 이런 일이?", source)
     text = (context or "").strip()
+    plain, _ = _extract_highlight_spans(text)
 
     pad = 42
     for size in (42, 40, 38, 36, 34):
         f = _font(True, size)
         gap = size + 22   # 이야기체는 줄간격을 여유있게
         inner_w = W - MARGIN * 2 - pad * 2
-        lines = _wrap(draw, text, f, inner_w)
+        lines = _wrap_keep(draw, plain, f, inner_w)
         panel_h = pad + 64 + len(lines) * gap + 66 + pad - 14   # +66 = 닫는 따옴표 공간
         if y + panel_h <= H - 160:
             break
-    lines = lines[:14]
+    n_lines = len(lines[:14])
 
     _draw_panel(img, [MARGIN, y, W - MARGIN, y + panel_h])
     draw = ImageDraw.Draw(img)
     draw.rounded_rectangle([MARGIN, y, MARGIN + 9, y + panel_h], radius=4, fill=HILITE)
     draw.text((MARGIN + pad - 6, y + pad - 28), "“", font=_font(True, 110), fill=HILITE)
     ty = y + pad + 64
-    for line in lines:
-        _draw_line_rich(draw, MARGIN + pad, ty, line, f, WHITE)
-        ty += gap
+    _draw_marked_paragraph(draw, MARGIN + pad, ty, text, f, inner_w, gap, max_lines=14)
+    ty += n_lines * gap
     # 닫는 따옴표 — 여는 따옴표와 짝 맞춰 우하단에
     draw.text((W - MARGIN - pad + 6, ty - 26), "”", font=_font(True, 110),
               fill=HILITE, anchor="ra")
