@@ -73,7 +73,7 @@ from job_summary import build_job_data
 from linkutil import expand_short_links
 from message_parser import URL_RE, detect_mode, extract_links, split_title_body
 from trends import (fetch_google_news_top, fetch_google_trends,
-                    fetch_naver_news_ranking, search_naver_news)
+                    fetch_naver_news_ranking, fetch_newsapi_top, search_naver_news)
 from naver_cafe import post_article
 from summarize import build_card_options
 from telegram_client import TelegramClient
@@ -122,6 +122,9 @@ HELP_TEXT = (
     "  '국내이슈' 라고 보내면 네이버 뉴스 랭킹 상위 기사를 추천합니다.\n\n"
     "🌍 해외 핫이슈 (키워드 없이 지금 전세계 화제 뉴스):\n"
     "  '해외이슈' 라고 보내면 구글 뉴스 World Top stories 를 추천합니다.\n\n"
+    "🗞 헤드라인 (NewsAPI · 국가/카테고리별 톱뉴스):\n"
+    "  '헤드라인' (기본 미국) 또는 '헤드라인 한국/일본/영국', '헤드라인 기술/경제' 등\n"
+    "  깨끗한 톱뉴스를 보여줍니다. (NEWSAPI_KEY 필요, 무료 등급은 24시간 지연)\n\n"
     "🛑 멈추기:\n"
     "  처리가 오래 걸리거나 멈춘 것 같으면 '취소' 라고 보내면 즉시 중단합니다."
 )
@@ -303,6 +306,56 @@ def handle_global_issues(tg: TelegramClient, chat_id: int, _rest: str):
         lines.append(f"{i}. {r['title']}{src}\n{r['link']}")
     lines.append("\n마음에 드는 링크를 복사해서 '카드' 또는 '채용' 뒤에 붙이면 바로 쓸 수 있어요.\n"
                 "(영어 기사면 번역해서 카드를 만들어드릴 수도 있어요)")
+    tg.send_message(chat_id, "\n\n".join(lines))
+
+
+_HEADLINE_REGION_MAP = {
+    "미국": "us", "한국": "kr", "국내": "kr", "일본": "jp", "영국": "gb",
+    "독일": "de", "프랑스": "fr", "인도": "in", "캐나다": "ca", "호주": "au",
+    "브라질": "br", "중국": "cn",
+}
+_HEADLINE_CATEGORY_MAP = {
+    "비즈니스": "business", "경제": "business", "기술": "technology", "테크": "technology",
+    "과학": "science", "건강": "health", "스포츠": "sports", "연예": "entertainment",
+}
+
+
+def handle_headlines(tg: TelegramClient, chat_id: int, rest: str):
+    """NewsAPI.org top-headlines — 국가/카테고리별 톱뉴스(깨끗한 JSON·이미지 URL).
+    '해외이슈'(구글 뉴스 RSS)와 독립적으로 동작. 무료 등급은 24시간 지연 제약 있음."""
+    if not config.NEWSAPI_KEY:
+        tg.send_message(chat_id,
+                        "ℹ️ NEWSAPI_KEY 가 .env 에 없어 '헤드라인'을 쓸 수 없어요.\n"
+                        "newsapi.org 에서 무료 키를 발급받아 .env 에 NEWSAPI_KEY=... 로 넣어주세요.\n"
+                        "(키 없이 지금 바로 쓰려면 '해외이슈'(구글 뉴스)를 이용하세요)")
+        return
+
+    rest = (rest or "").strip()
+    country, country_label = "us", "미국"
+    category = None
+    for name, code in _HEADLINE_REGION_MAP.items():
+        if name in rest:
+            country, country_label = code, name
+            break
+    for name, code in _HEADLINE_CATEGORY_MAP.items():
+        if name in rest:
+            category = code
+            break
+
+    cat_label = f" · {category}" if category else ""
+    tg.send_message(chat_id, f"⏳ 헤드라인(NewsAPI · {country_label}{cat_label}) 확인 중...")
+    try:
+        results = fetch_newsapi_top(country=country, category=category, count=8)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 헤드라인 조회 실패: {e}")
+        return
+
+    lines = [f"🗞 톱 헤드라인 ({country_label}{cat_label}) — NewsAPI"]
+    for i, r in enumerate(results, 1):
+        src = f" ({r['source']})" if r.get("source") else ""
+        lines.append(f"{i}. {r['title']}{src}\n{r['link']}")
+    lines.append("\n마음에 드는 링크를 복사해서 '카드' 또는 '채용' 뒤에 붙이면 바로 쓸 수 있어요.\n"
+                "(무료 등급은 기사가 24시간 정도 지연될 수 있어요 — 최신속보는 '해외이슈' 이용)")
     tg.send_message(chat_id, "\n\n".join(lines))
 
 
@@ -726,6 +779,8 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_domestic_issues(tg, chat_id, content)
     elif mode == "global_issue":
         handle_global_issues(tg, chat_id, content)
+    elif mode == "headline":
+        handle_headlines(tg, chat_id, content)
     else:
         tg.send_message(chat_id, HELP_TEXT)
 

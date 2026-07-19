@@ -37,6 +37,12 @@ NAVER_CAFE_MENU_ID = os.getenv("NAVER_CAFE_MENU_ID", "")   # 게시판 숫자 ID
 NAVER_CAFE_JOB_MENU_ID = os.getenv("NAVER_CAFE_JOB_MENU_ID", "")
 NAVER_TOKEN_FILE = BASE_DIR / "naver_tokens.json"
 
+# ── NewsAPI.org (선택 — '헤드라인' 명령용) ─────────────────
+# newsapi.org 에서 무료 키 발급. 무료 등급은 하루 100회 + 기사 24시간 지연 제약이 있어
+# '지금 뜨는' 용도로는 '해외이슈'(구글 뉴스 RSS)가 더 낫지만, 깨끗한 JSON·이미지 URL이
+# 필요하면 이 키를 채워두면 '헤드라인' 명령으로 국가/카테고리별 톱뉴스를 받아옵니다.
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "").strip()
+
 # ── AI 요약 (선택 — 없으면 og 메타데이터 기반 요약으로 대체) ──
 # ① 구글 Gemini (무료 등급) — aistudio.google.com/apikey 에서 발급
 # 여러 구글 계정으로 키를 여러 개 만들어 콤마로 나열하면, 한 키가 할당량 초과(429)일 때

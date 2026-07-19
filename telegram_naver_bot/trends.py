@@ -11,6 +11,9 @@
 ⑤ 구글 뉴스 RSS Top stories — 키워드 없이, 국가/언어별로 지금 주요 뉴스를
    가져온다. API 키가 필요 없는 공식 RSS 라 ③④ 보다 안정적이며, gl/ceid 만 바꾸면
    국내('국내이슈')·해외('해외이슈') 모두 쓸 수 있다.
+⑥ NewsAPI.org top-headlines — 국가/카테고리별 톱뉴스를 깨끗한 JSON(제목·직접
+   링크·이미지 URL·언론사명)으로 준다. 정식 문서화된 API 지만 무료 등급은 하루 100회 +
+   기사 24시간 지연 제약이 있다. '헤드라인' 명령으로 ⑤ 와 독립적으로 쓴다.
 
 ⚠️ ②③④ 는 전부 공식 API 가 아니라(②는 비공식 RSS, ③은 HTML 페이지, ④는 레딧의
 공개 읽기전용 JSON) 언제든 형식이 바뀔 수 있다. 이 봇 개발 환경에서는 관련 도메인
@@ -246,6 +249,68 @@ def fetch_google_news_top(topic: str = "WORLD", hl: str = "en-US", gl: str = "US
 
     if not results:
         raise RuntimeError("구글 뉴스에서 기사를 찾지 못했습니다 — RSS 형식이 바뀌었을 수 있어요.")
+    return results
+
+
+def fetch_newsapi_top(country: str = "us", category: str = None,
+                      query: str = None, count: int = 8) -> list:
+    """NewsAPI.org top-headlines — 국가/카테고리별 톱뉴스를 깨끗한 JSON 으로.
+    ⑤(구글 뉴스 RSS)와 독립적으로 '헤드라인' 명령에서 쓴다.
+
+    country  : us / kr / jp / gb / de / fr / in / ca ... (None 이면 국가 미지정)
+    category : business / technology / sports / science / health / entertainment
+    query    : 키워드(있으면 country 없이도 됨)
+    returns [{"title","link","source","image","pubDate","desc"}]
+
+    ⚠️ 무료 등급은 하루 100회 + 기사 24시간 지연 제약이 있다."""
+    if not config.NEWSAPI_KEY:
+        raise RuntimeError("NEWSAPI_KEY 가 .env 에 설정되어 있지 않습니다. "
+                           "newsapi.org 에서 무료 키를 발급받아 넣어주세요.")
+
+    params = {"pageSize": min(max(count, 1), 100)}
+    if query:
+        params["q"] = query
+    if country:
+        params["country"] = country
+    if category:
+        params["category"] = category
+
+    # 키는 헤더로 보낸다(URL 로그에 안 남게). 헤더 값은 ASCII 라 인코딩 문제 없음.
+    headers = {"X-Api-Key": config.NEWSAPI_KEY}
+    try:
+        resp = requests.get("https://newsapi.org/v2/top-headlines",
+                            params=params, headers=headers, timeout=20)
+    except Exception as e:
+        raise RuntimeError(f"NewsAPI 요청 실패: {e}")
+
+    try:
+        data = resp.json()
+    except Exception:
+        data = {}
+    if resp.status_code != 200 or data.get("status") != "ok":
+        msg = data.get("message") or resp.text[:200]
+        raise RuntimeError(f"NewsAPI 응답 실패 (HTTP {resp.status_code}): {msg}")
+
+    results = []
+    for a in data.get("articles", []):
+        title = (a.get("title") or "").strip()
+        link = (a.get("url") or "").strip()
+        if not title or not link:
+            continue
+        results.append({
+            "title": title,
+            "link": link,
+            "source": (a.get("source") or {}).get("name", ""),
+            "image": a.get("urlToImage") or "",
+            "pubDate": a.get("publishedAt") or "",
+            "desc": (a.get("description") or "").strip(),
+        })
+        if len(results) >= count:
+            break
+
+    if not results:
+        raise RuntimeError("NewsAPI 에서 기사를 찾지 못했습니다 "
+                           "(무료 등급은 기사 24시간 지연 · 일부 국가 미지원일 수 있어요).")
     return results
 
 
