@@ -198,7 +198,7 @@ def fetch_reddit_top(subreddit: str = "worldnews", count: int = 8, timeframe: st
     """레딧 인기글(공개 읽기전용 JSON) — 키워드 없이 지금 전세계에서 화제인
     뉴스를 가져온다. returns [{"title","link","score","domain"}]"""
     url = f"https://www.reddit.com/r/{subreddit}/top.json"
-    headers = {"User-Agent": "jobnyou-cardnews-bot/1.0 (Telegram 뉴스 카드뉴스용)"}
+    headers = {"User-Agent": "jobnyou-cardnews-bot/1.0 (Telegram news card bot)"}
     resp = requests.get(url, params={"t": timeframe, "limit": count},
                        headers=headers, timeout=20)
     if resp.status_code != 200:
