@@ -194,15 +194,37 @@ def fetch_naver_news_ranking(count: int = 10) -> list:
     return results
 
 
+_REDDIT_HEADERS = {
+    # 레딧이 2023년 이후 기본/봇처럼 보이는 User-Agent 는 403 으로 막는 경우가 많아,
+    # 일반 브라우저처럼 보이는 헤더를 사용한다.
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
+    "Accept": "application/json",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+}
+
+
 def fetch_reddit_top(subreddit: str = "worldnews", count: int = 8, timeframe: str = "day") -> list:
     """레딧 인기글(공개 읽기전용 JSON) — 키워드 없이 지금 전세계에서 화제인
-    뉴스를 가져온다. returns [{"title","link","score","domain"}]"""
-    url = f"https://www.reddit.com/r/{subreddit}/top.json"
-    headers = {"User-Agent": "jobnyou-cardnews-bot/1.0 (Telegram news card bot)"}
-    resp = requests.get(url, params={"t": timeframe, "limit": count},
-                       headers=headers, timeout=20)
-    if resp.status_code != 200:
-        raise RuntimeError(f"레딧 응답 실패 (HTTP {resp.status_code})")
+    뉴스를 가져온다. returns [{"title","link","score","domain"}]
+
+    ⚠️ 레딧이 www.reddit.com 의 .json 엔드포인트를 봇처럼 보이는 트래픽에 대해
+    403 으로 막는 경우가 늘고 있다. www.reddit.com 이 막히면 old.reddit.com 으로
+    한 번 더 시도한다."""
+    params = {"t": timeframe, "limit": count}
+    last_err = None
+    for host in ("www.reddit.com", "old.reddit.com"):
+        url = f"https://{host}/r/{subreddit}/top.json"
+        try:
+            resp = requests.get(url, params=params, headers=_REDDIT_HEADERS, timeout=20)
+        except Exception as e:
+            last_err = RuntimeError(f"레딧 요청 실패({host}): {e}")
+            continue
+        if resp.status_code == 200:
+            break
+        last_err = RuntimeError(f"레딧 응답 실패 (HTTP {resp.status_code}, {host})")
+    else:
+        raise last_err
     children = resp.json().get("data", {}).get("children", [])
 
     results = []
