@@ -72,6 +72,7 @@ from job_card import render_job_card
 from job_summary import build_job_data
 from linkutil import expand_short_links
 from message_parser import URL_RE, detect_mode, extract_links, split_title_body
+from trends import fetch_google_trends, search_naver_news
 from naver_cafe import post_article
 from summarize import build_card_options
 from telegram_client import TelegramClient
@@ -110,6 +111,12 @@ HELP_TEXT = (
     "🔗 단축주소 펼치기:\n"
     "  첫 줄에 '펼치기' 라고 쓰고, 단축주소(buly.kr 등)가 든 글을 넣으면\n"
     "  원본 주소로 펼친 전체 글을 그대로 돌려드립니다.\n\n"
+    "📰 뉴스 검색 (산업/키워드 화제 기사 찾기):\n"
+    "  '뉴스' + 키워드 — 최근 화제 기사를 언론사 보도 개수 순으로 추천합니다.\n"
+    "  예) 뉴스 자동차산업\n\n"
+    "🔥 실시간 트렌드 (분야 무관, 지금 뜨는 검색어):\n"
+    "  '트렌드' (기본 국내) 또는 '트렌드 미국/일본/영국' 등\n"
+    "  지금 인기 검색어와 관련 뉴스를 보여드립니다.\n\n"
     "🛑 멈추기:\n"
     "  처리가 오래 걸리거나 멈춘 것 같으면 '취소' 라고 보내면 즉시 중단합니다."
 )
@@ -182,6 +189,79 @@ def handle_expand(tg: TelegramClient, chat_id: int, content: str):
     if expanded == content:
         tg.send_message(chat_id, "ℹ️ 펼칠 단축주소를 찾지 못했어요 (이미 원본 주소이거나 지원 안 하는 도메인).")
     tg.send_message(chat_id, expanded)
+
+
+# ── 뉴스 검색 / 실시간 트렌드 ─────────────────────────────
+
+def handle_news_search(tg: TelegramClient, chat_id: int, keyword: str):
+    """네이버 뉴스 검색 — 키워드 관련 최근 화제 기사(여러 언론사가 다룬 순)를 추천."""
+    keyword = keyword.strip()
+    if not keyword:
+        tg.send_message(chat_id, "⚠️ '뉴스' 뒤에 검색할 산업/키워드를 넣어주세요.\n예) 뉴스 자동차산업")
+        return
+    if not (config.NAVER_CLIENT_ID and config.NAVER_CLIENT_SECRET):
+        tg.send_message(chat_id, "ℹ️ 네이버 API(NAVER_CLIENT_ID/SECRET)가 .env 에 없어 뉴스 검색을 할 수 없어요.")
+        return
+
+    tg.send_message(chat_id, f"⏳ '{keyword}' 관련 최근 화제 기사를 찾는 중...")
+    try:
+        results = search_naver_news(keyword, count=8)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 뉴스 검색 실패: {e}")
+        return
+    if not results:
+        tg.send_message(chat_id, f"최근 48시간 내 '{keyword}' 관련 기사를 찾지 못했어요. "
+                                 "키워드를 좀 더 넓게 해보세요.")
+        return
+
+    lines = [f"📰 '{keyword}' 최근 화제 기사 (여러 언론사가 다룬 순)"]
+    for i, r in enumerate(results, 1):
+        tag = f" — 언론사 {r['count']}곳 보도" if r["count"] > 1 else ""
+        lines.append(f"{i}. {r['title']}{tag}\n{r['link']}")
+    lines.append("\n마음에 드는 링크를 복사해서 '카드' 또는 '채용' 뒤에 붙이면 바로 쓸 수 있어요.")
+    tg.send_message(chat_id, "\n\n".join(lines))
+
+
+_TREND_REGION_MAP = {
+    "미국": "US", "일본": "JP", "영국": "GB", "독일": "DE", "인도": "IN",
+    "프랑스": "FR", "브라질": "BR", "캐나다": "CA", "한국": "KR", "국내": "KR",
+}
+
+
+def handle_trends(tg: TelegramClient, chat_id: int, region_text: str):
+    """구글 트렌드 — 특정 산업에 한정되지 않는 국내/해외 실시간 인기 검색어 + 관련 뉴스.
+    ⚠️ 비공식 RSS 피드라 형식이 바뀌면 실패할 수 있음 (실패 시 로그를 보고 조정 필요)."""
+    region_text = (region_text or "").strip()
+    geo, geo_label = "KR", "국내"
+    for name, code in _TREND_REGION_MAP.items():
+        if name in region_text:
+            geo, geo_label = code, name
+            break
+
+    tg.send_message(chat_id, f"⏳ 구글 트렌드({geo_label}) 확인 중...")
+    try:
+        trends = fetch_google_trends(geo=geo, count=8)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 트렌드 조회 실패: {e}\n"
+                                 "(구글 트렌드는 비공식 피드라 형식이 바뀌었을 수 있어요 — "
+                                 "이 오류 내용을 보여주시면 바로 고칠게요)")
+        return
+    if not trends:
+        tg.send_message(chat_id, "지금 트렌드 데이터를 가져오지 못했어요.")
+        return
+
+    lines = [f"🔥 지금 뜨는 검색어 ({geo_label})"]
+    for i, t in enumerate(trends, 1):
+        line = f"{i}. {t['title']}"
+        if t.get("traffic"):
+            line += f" ({t['traffic']})"
+        if t.get("articles"):
+            a = t["articles"][0]
+            src = f" ({a['source']})" if a.get("source") else ""
+            line += f"\n   → {a['title']}{src}\n   {a['link']}"
+        lines.append(line)
+    lines.append("\n마음에 드는 링크를 복사해서 '카드' 또는 '채용' 뒤에 붙이면 바로 쓸 수 있어요.")
+    tg.send_message(chat_id, "\n\n".join(lines))
 
 
 # ── 채용공고 카드 + 카페 게시 ─────────────────────────────
@@ -596,6 +676,10 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_job(tg, chat_id, content)
     elif mode == "expand":
         handle_expand(tg, chat_id, content)
+    elif mode == "news":
+        handle_news_search(tg, chat_id, content)
+    elif mode == "trend":
+        handle_trends(tg, chat_id, content)
     else:
         tg.send_message(chat_id, HELP_TEXT)
 
