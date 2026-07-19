@@ -81,6 +81,41 @@ def _respect_rate_limit():
         time.sleep(wait)
 
 
+# 네이버 카페 API 에러코드 → 사람이 읽을 수 있는 원인/해결 힌트
+_NAVER_ERR_HINTS = {
+    "024": "인증 실패 — access_token 이 유효하지 않아요. `python naver_auth.py` 로 다시 로그인해 토큰을 새로 발급하세요.",
+    "028": "권한 없음 — 이 앱/토큰에 카페 글쓰기 권한이 없거나, 로그인한 네이버 계정이 이 게시판에 글 쓸 권한이 없어요.",
+    "403": "권한 없음/도배 제한 — 게시판 쓰기 권한 부족이거나, 짧은 시간에 너무 자주 올려 막혔을 수 있어요.",
+    "haveto": "카페 등급/권한 부족 — 게시판이 요구하는 회원 등급을 아직 못 채웠거나, 매니저가 API 글쓰기를 막아둔 게시판일 수 있어요.",
+}
+
+
+def _format_post_error(resp) -> str:
+    """네이버 403/오류 응답에서 에러코드·메시지를 뽑아 사람이 읽을 수 있게 정리."""
+    code = msg = ""
+    try:
+        data = resp.json()
+        # 네이버 응답 형식이 여러 가지라 두루 뒤진다.
+        m = data.get("message", data)
+        err = (m.get("error") if isinstance(m, dict) else None) or {}
+        code = str(err.get("code") or data.get("errorCode") or "")
+        msg = str(err.get("msg") or data.get("errorMessage") or "")
+    except Exception:
+        pass
+
+    hint = ""
+    for key, text in _NAVER_ERR_HINTS.items():
+        if key and (key == code or key in (msg or "").lower()):
+            hint = "\n➡️ " + text
+            break
+    if not hint and resp.status_code == 403:
+        hint = ("\n➡️ 403 은 보통 ①토큰 만료/권한(→`python naver_auth.py` 재로그인) "
+                "②도배 제한(잠시 후 재시도) ③게시판 쓰기 권한/등급 부족 중 하나예요.")
+
+    detail = f"code={code} msg={msg}".strip() if (code or msg) else resp.text[:400]
+    return f"카페 글쓰기 실패 (HTTP {resp.status_code}): {detail}{hint}"
+
+
 def post_article(subject: str, content_html: str, image_paths=None,
                  menu_id: str = "") -> dict:
     """카페에 글을 작성하고 {'articleId': ..., 'articleUrl': ...} 를 반환합니다.
@@ -139,7 +174,7 @@ def post_article(subject: str, content_html: str, image_paths=None,
 
     _last_post_at = time.time()  # 실패한 시도도 도배 방지 카운트에 걸릴 수 있어 항상 기록
     if resp.status_code != 200:
-        raise RuntimeError(f"카페 글쓰기 실패 (HTTP {resp.status_code}): {resp.text[:500]}")
+        raise RuntimeError(_format_post_error(resp))
 
     result = resp.json().get("message", {}).get("result", {})
     return {
