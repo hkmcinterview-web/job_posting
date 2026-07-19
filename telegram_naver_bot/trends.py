@@ -4,12 +4,14 @@
 ① 네이버 뉴스 검색 API — 키워드로 최근 기사를 모아, 여러 언론사가 같은 소식을
    다룬(=화제성이 높은) 순서로 정렬해서 상위 몇 개를 추천한다.
 ② 구글 트렌드 — 특정 산업에 한정되지 않는, 국내/해외 실시간 인기 검색어와
-   관련 뉴스를 가져온다.
+   관련 뉴스를 가져온다. (비공식 RSS)
+③ 네이버 뉴스 랭킹 — 키워드 없이, 지금 국내에서 많이 읽히는 기사 자체를 가져온다.
+④ 레딧 r/worldnews 인기글 — 키워드 없이, 지금 전세계에서 화제인 뉴스를 가져온다.
 
-⚠️ 구글 트렌드는 공식 API 가 아니라 비공식 RSS 피드(trends.google.com)를 쓴다.
-언제든 형식이 바뀔 수 있어, 실패하면 로그를 보고 파서를 조정해야 할 수 있다.
-이 봇 개발 환경에서는 trends.google.com 접근이 막혀 있어 실제 응답으로
-검증하지 못했다 — 처음 실행 시 결과가 이상하면 콘솔 로그를 확인해달라.
+⚠️ ②③④ 는 전부 공식 API 가 아니라(②는 비공식 RSS, ③은 HTML 페이지, ④는 레딧의
+공개 읽기전용 JSON) 언제든 형식이 바뀔 수 있다. 이 봇 개발 환경에서는 관련 도메인
+접근이 전부 막혀 있어 실제 응답으로 검증하지 못했다 — 실행해보고 이상하면 콘솔
+로그(오류 메시지)를 확인해달라. ①(네이버 뉴스 검색)만 공식 문서화된 안정적인 API.
 """
 import html
 import re
@@ -18,6 +20,7 @@ from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 
 import requests
+from bs4 import BeautifulSoup
 
 import config
 
@@ -149,6 +152,70 @@ def fetch_google_trends(geo: str = "KR", count: int = 10) -> list:
                 })
 
         results.append({"title": title, "traffic": traffic, "articles": articles[:3]})
+        if len(results) >= count:
+            break
+    return results
+
+
+_ARTICLE_LINK_RE = re.compile(r"/(article|mnews/article)/\d+/\d+")
+
+
+def fetch_naver_news_ranking(count: int = 10) -> list:
+    """네이버 뉴스 '많이 본 뉴스' 랭킹 페이지에서, 키워드 없이 지금 국내에서
+    많이 읽히는 기사 자체를 가져온다 (구글 트렌드의 '검색어'보다 카드뉴스
+    소재로 바로 쓰기 좋음). returns [{"title","link"}]
+
+    ⚠️ 공식 API 가 아니라 페이지를 그대로 읽는 방식이라, 네이버가 화면 구조를
+    바꾸면 깨질 수 있다."""
+    url = "https://news.naver.com/main/ranking/popularDay.naver"
+    resp = requests.get(url, headers=_TRENDS_HEADERS, timeout=20)
+    if resp.status_code != 200:
+        raise RuntimeError(f"네이버 뉴스 랭킹 페이지 응답 실패 (HTTP {resp.status_code})")
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    results, seen = [], set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if not _ARTICLE_LINK_RE.search(href):
+            continue
+        title = a.get_text(strip=True)
+        if len(title) < 8:   # '언론사 홈', '더보기' 등 네비게이션 링크 제외
+            continue
+        link = href if href.startswith("http") else f"https://news.naver.com{href}"
+        if link in seen:
+            continue
+        seen.add(link)
+        results.append({"title": title, "link": link})
+        if len(results) >= count:
+            break
+
+    if not results:
+        raise RuntimeError("랭킹 기사를 찾지 못했습니다 — 네이버가 페이지 구조를 바꿨을 수 있어요.")
+    return results
+
+
+def fetch_reddit_top(subreddit: str = "worldnews", count: int = 8, timeframe: str = "day") -> list:
+    """레딧 인기글(공개 읽기전용 JSON) — 키워드 없이 지금 전세계에서 화제인
+    뉴스를 가져온다. returns [{"title","link","score","domain"}]"""
+    url = f"https://www.reddit.com/r/{subreddit}/top.json"
+    headers = {"User-Agent": "jobnyou-cardnews-bot/1.0 (Telegram 뉴스 카드뉴스용)"}
+    resp = requests.get(url, params={"t": timeframe, "limit": count},
+                       headers=headers, timeout=20)
+    if resp.status_code != 200:
+        raise RuntimeError(f"레딧 응답 실패 (HTTP {resp.status_code})")
+    children = resp.json().get("data", {}).get("children", [])
+
+    results = []
+    for c in children:
+        d = c.get("data", {})
+        title = (d.get("title") or "").strip()
+        link = d.get("url") or f"https://reddit.com{d.get('permalink', '')}"
+        if not title or not link:
+            continue
+        results.append({
+            "title": title, "link": link,
+            "score": d.get("score", 0), "domain": d.get("domain", ""),
+        })
         if len(results) >= count:
             break
     return results

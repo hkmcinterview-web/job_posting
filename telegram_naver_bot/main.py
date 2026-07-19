@@ -72,7 +72,8 @@ from job_card import render_job_card
 from job_summary import build_job_data
 from linkutil import expand_short_links
 from message_parser import URL_RE, detect_mode, extract_links, split_title_body
-from trends import fetch_google_trends, search_naver_news
+from trends import (fetch_google_trends, fetch_naver_news_ranking, fetch_reddit_top,
+                    search_naver_news)
 from naver_cafe import post_article
 from summarize import build_card_options
 from telegram_client import TelegramClient
@@ -117,6 +118,10 @@ HELP_TEXT = (
     "🔥 실시간 트렌드 (분야 무관, 지금 뜨는 검색어):\n"
     "  '트렌드' (기본 국내) 또는 '트렌드 미국/일본/영국' 등\n"
     "  지금 인기 검색어와 관련 뉴스를 보여드립니다.\n\n"
+    "🇰🇷 국내 핫이슈 (키워드 없이 지금 많이 읽히는 기사):\n"
+    "  '국내이슈' 라고 보내면 네이버 뉴스 랭킹 상위 기사를 추천합니다.\n\n"
+    "🌍 해외 핫이슈 (키워드 없이 지금 전세계 화제 뉴스):\n"
+    "  '해외이슈' 라고 보내면 레딧 r/worldnews 인기글을 추천합니다.\n\n"
     "🛑 멈추기:\n"
     "  처리가 오래 걸리거나 멈춘 것 같으면 '취소' 라고 보내면 즉시 중단합니다."
 )
@@ -261,6 +266,41 @@ def handle_trends(tg: TelegramClient, chat_id: int, region_text: str):
             line += f"\n   → {a['title']}{src}\n   {a['link']}"
         lines.append(line)
     lines.append("\n마음에 드는 링크를 복사해서 '카드' 또는 '채용' 뒤에 붙이면 바로 쓸 수 있어요.")
+    tg.send_message(chat_id, "\n\n".join(lines))
+
+
+def handle_domestic_issues(tg: TelegramClient, chat_id: int, _rest: str):
+    """네이버 뉴스 '많이 본 뉴스' — 키워드 없이 지금 국내에서 화제인 기사 자체를 추천."""
+    tg.send_message(chat_id, "⏳ 국내 핫이슈(네이버 뉴스 랭킹) 확인 중...")
+    try:
+        results = fetch_naver_news_ranking(count=8)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 국내 이슈 조회 실패: {e}\n"
+                                 "(공식 API 가 아니라 페이지 구조 변경에 취약해요 — "
+                                 "이 오류 내용을 보여주시면 바로 고칠게요)")
+        return
+    lines = ["🇰🇷 지금 국내에서 많이 읽히는 기사"]
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r['title']}\n{r['link']}")
+    lines.append("\n마음에 드는 링크를 복사해서 '카드' 또는 '채용' 뒤에 붙이면 바로 쓸 수 있어요.")
+    tg.send_message(chat_id, "\n\n".join(lines))
+
+
+def handle_global_issues(tg: TelegramClient, chat_id: int, _rest: str):
+    """레딧 r/worldnews 인기글 — 키워드 없이 지금 전세계에서 화제인 뉴스를 추천."""
+    tg.send_message(chat_id, "⏳ 전세계 핫이슈(레딧 r/worldnews) 확인 중...")
+    try:
+        results = fetch_reddit_top(subreddit="worldnews", count=8)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 해외 이슈 조회 실패: {e}\n"
+                                 "(공식 API 가 아니라 레딧 정책 변경에 취약해요 — "
+                                 "이 오류 내용을 보여주시면 바로 고칠게요)")
+        return
+    lines = ["🌍 지금 전세계에서 화제인 뉴스 (r/worldnews 인기글)"]
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r['title']} (👍{r['score']:,} · {r['domain']})\n{r['link']}")
+    lines.append("\n마음에 드는 링크를 복사해서 '카드' 또는 '채용' 뒤에 붙이면 바로 쓸 수 있어요.\n"
+                "(영어 기사면 번역해서 카드를 만들어드릴 수도 있어요)")
     tg.send_message(chat_id, "\n\n".join(lines))
 
 
@@ -680,6 +720,10 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_news_search(tg, chat_id, content)
     elif mode == "trend":
         handle_trends(tg, chat_id, content)
+    elif mode == "domestic_issue":
+        handle_domestic_issues(tg, chat_id, content)
+    elif mode == "global_issue":
+        handle_global_issues(tg, chat_id, content)
     else:
         tg.send_message(chat_id, HELP_TEXT)
 

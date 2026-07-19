@@ -17,12 +17,15 @@ EXPAND_WORDS = ("펼치기", "펼침", "링크펼치기", "expand")
 CANCEL_WORDS = ("취소", "중지", "정지", "그만", "stop", "cancel")
 FINISH_WORDS = ("완료", "끝", "다됐어", "done", "finish")
 NEWS_WORDS = ("뉴스", "뉴스검색", "이슈검색")
-TREND_WORDS = ("트렌드", "핫이슈", "트렌드검색")
+TREND_WORDS = ("트렌드", "트렌드검색")
+DOMESTIC_ISSUE_WORDS = ("국내이슈", "국내핫이슈")
+GLOBAL_ISSUE_WORDS = ("해외이슈", "글로벌이슈", "세계이슈", "전세계이슈", "해외핫이슈")
 
 
 def detect_mode(text: str):
     """returns (mode, rest_text). mode ∈
-    {'cafe','card','job','expand','cancel','finish','news','trend',None}"""
+    {'cafe','card','job','expand','cancel','finish','news','trend',
+     'domestic_issue','global_issue',None}"""
     stripped = (text or "").lstrip()
     # 첫 토큰(공백/줄바꿈/콜론 전까지)
     head = re.split(r"[\s:：]", stripped, 1)[0].lower()
@@ -35,6 +38,10 @@ def detect_mode(text: str):
         return "news", rest
     if head in TREND_WORDS:
         return "trend", rest
+    if head in DOMESTIC_ISSUE_WORDS:
+        return "domestic_issue", rest
+    if head in GLOBAL_ISSUE_WORDS:
+        return "global_issue", rest
     if head in CAFE_WORDS:
         return "cafe", rest
     if head in CARD_WORDS:
