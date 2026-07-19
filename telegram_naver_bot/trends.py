@@ -6,12 +6,17 @@
 ② 구글 트렌드 — 특정 산업에 한정되지 않는, 국내/해외 실시간 인기 검색어와
    관련 뉴스를 가져온다. (비공식 RSS)
 ③ 네이버 뉴스 랭킹 — 키워드 없이, 지금 국내에서 많이 읽히는 기사 자체를 가져온다.
-④ 레딧 r/worldnews 인기글 — 키워드 없이, 지금 전세계에서 화제인 뉴스를 가져온다.
+④ 레딧 r/worldnews 인기글 — 키워드 없이 전세계 화제 뉴스. (레딧이 봇 트래픽을
+   403 으로 막는 일이 잦아, 지금 '해외이슈' 는 ⑤ 를 대신 쓴다.)
+⑤ 구글 뉴스 RSS Top stories — 키워드 없이, 국가/언어별로 지금 주요 뉴스를
+   가져온다. API 키가 필요 없는 공식 RSS 라 ③④ 보다 안정적이며, gl/ceid 만 바꾸면
+   국내('국내이슈')·해외('해외이슈') 모두 쓸 수 있다.
 
 ⚠️ ②③④ 는 전부 공식 API 가 아니라(②는 비공식 RSS, ③은 HTML 페이지, ④는 레딧의
 공개 읽기전용 JSON) 언제든 형식이 바뀔 수 있다. 이 봇 개발 환경에서는 관련 도메인
 접근이 전부 막혀 있어 실제 응답으로 검증하지 못했다 — 실행해보고 이상하면 콘솔
-로그(오류 메시지)를 확인해달라. ①(네이버 뉴스 검색)만 공식 문서화된 안정적인 API.
+로그(오류 메시지)를 확인해달라. ①(네이버 뉴스 검색)만 공식 문서화된 안정적인 API,
+⑤(구글 뉴스 RSS)는 키가 필요 없는 공식 RSS 라 그 다음으로 안정적이다.
 """
 import html
 import re
@@ -191,6 +196,56 @@ def fetch_naver_news_ranking(count: int = 10) -> list:
 
     if not results:
         raise RuntimeError("랭킹 기사를 찾지 못했습니다 — 네이버가 페이지 구조를 바꿨을 수 있어요.")
+    return results
+
+
+def fetch_google_news_top(topic: str = "WORLD", hl: str = "en-US", gl: str = "US",
+                          ceid: str = "US:en", count: int = 8) -> list:
+    """구글 뉴스 RSS Top stories — 키워드 없이 지금 화제인 주요 뉴스를 가져온다.
+    API 키가 필요 없는 공식 RSS 라 레딧/스크래핑보다 안정적이다.
+
+    topic : WORLD / NATION / BUSINESS / TECHNOLOGY / SPORTS ... (None 이면 전체 Top)
+    hl/gl/ceid : 언어·국가 코드. 해외=en-US/US/US:en, 국내=ko/KR/KR:ko.
+    returns [{"title","link","source","pubDate"}]"""
+    if topic:
+        url = (f"https://news.google.com/rss/headlines/section/topic/{topic}"
+               f"?hl={hl}&gl={gl}&ceid={ceid}")
+    else:
+        url = f"https://news.google.com/rss?hl={hl}&gl={gl}&ceid={ceid}"
+
+    try:
+        resp = requests.get(url, headers=_TRENDS_HEADERS, timeout=20)
+    except Exception as e:
+        raise RuntimeError(f"구글 뉴스 RSS 요청 실패: {e}")
+    if resp.status_code != 200:
+        raise RuntimeError(f"구글 뉴스 RSS 응답 실패 (HTTP {resp.status_code})")
+
+    try:
+        root = ET.fromstring(resp.content)
+    except Exception as e:
+        raise RuntimeError(f"구글 뉴스 RSS 파싱 실패(형식이 바뀌었을 수 있음): {e}")
+
+    results = []
+    for item in root.iter("item"):
+        t_el = item.find("title")
+        title = (t_el.text or "").strip() if t_el is not None else ""
+        if not title:
+            continue
+        l_el = item.find("link")
+        link = (l_el.text or "").strip() if l_el is not None else ""
+        s_el = item.find("source")
+        source = (s_el.text or "").strip() if s_el is not None else ""
+        # 구글 뉴스 제목은 "헤드라인 - 언론사" 형태 — 뒤의 언론사명은 떼어낸다.
+        if source and title.endswith(f" - {source}"):
+            title = title[: -(len(source) + 3)].strip()
+        p_el = item.find("pubDate")
+        pub = (p_el.text or "").strip() if p_el is not None else ""
+        results.append({"title": title, "link": link, "source": source, "pubDate": pub})
+        if len(results) >= count:
+            break
+
+    if not results:
+        raise RuntimeError("구글 뉴스에서 기사를 찾지 못했습니다 — RSS 형식이 바뀌었을 수 있어요.")
     return results
 
 

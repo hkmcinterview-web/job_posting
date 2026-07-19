@@ -72,8 +72,8 @@ from job_card import render_job_card
 from job_summary import build_job_data
 from linkutil import expand_short_links
 from message_parser import URL_RE, detect_mode, extract_links, split_title_body
-from trends import (fetch_google_trends, fetch_naver_news_ranking, fetch_reddit_top,
-                    search_naver_news)
+from trends import (fetch_google_news_top, fetch_google_trends,
+                    fetch_naver_news_ranking, search_naver_news)
 from naver_cafe import post_article
 from summarize import build_card_options
 from telegram_client import TelegramClient
@@ -121,7 +121,7 @@ HELP_TEXT = (
     "🇰🇷 국내 핫이슈 (키워드 없이 지금 많이 읽히는 기사):\n"
     "  '국내이슈' 라고 보내면 네이버 뉴스 랭킹 상위 기사를 추천합니다.\n\n"
     "🌍 해외 핫이슈 (키워드 없이 지금 전세계 화제 뉴스):\n"
-    "  '해외이슈' 라고 보내면 레딧 r/worldnews 인기글을 추천합니다.\n\n"
+    "  '해외이슈' 라고 보내면 구글 뉴스 World Top stories 를 추천합니다.\n\n"
     "🛑 멈추기:\n"
     "  처리가 오래 걸리거나 멈춘 것 같으면 '취소' 라고 보내면 즉시 중단합니다."
 )
@@ -287,18 +287,20 @@ def handle_domestic_issues(tg: TelegramClient, chat_id: int, _rest: str):
 
 
 def handle_global_issues(tg: TelegramClient, chat_id: int, _rest: str):
-    """레딧 r/worldnews 인기글 — 키워드 없이 지금 전세계에서 화제인 뉴스를 추천."""
-    tg.send_message(chat_id, "⏳ 전세계 핫이슈(레딧 r/worldnews) 확인 중...")
+    """구글 뉴스 RSS(World) — 키워드 없이 지금 전세계에서 화제인 주요 뉴스를 추천."""
+    tg.send_message(chat_id, "⏳ 전세계 핫이슈(구글 뉴스 World) 확인 중...")
     try:
-        results = fetch_reddit_top(subreddit="worldnews", count=8)
+        results = fetch_google_news_top(topic="WORLD", hl="en-US", gl="US",
+                                        ceid="US:en", count=8)
     except Exception as e:
         tg.send_message(chat_id, f"⚠️ 해외 이슈 조회 실패: {e}\n"
-                                 "(공식 API 가 아니라 레딧 정책 변경에 취약해요 — "
-                                 "이 오류 내용을 보여주시면 바로 고칠게요)")
+                                 "(구글 뉴스 RSS 는 키가 필요 없는 공식 피드지만 형식이 "
+                                 "바뀌면 실패할 수 있어요 — 이 오류 내용을 보여주시면 바로 고칠게요)")
         return
-    lines = ["🌍 지금 전세계에서 화제인 뉴스 (r/worldnews 인기글)"]
+    lines = ["🌍 지금 전세계에서 화제인 뉴스 (구글 뉴스 World)"]
     for i, r in enumerate(results, 1):
-        lines.append(f"{i}. {r['title']} (👍{r['score']:,} · {r['domain']})\n{r['link']}")
+        src = f" ({r['source']})" if r.get("source") else ""
+        lines.append(f"{i}. {r['title']}{src}\n{r['link']}")
     lines.append("\n마음에 드는 링크를 복사해서 '카드' 또는 '채용' 뒤에 붙이면 바로 쓸 수 있어요.\n"
                 "(영어 기사면 번역해서 카드를 만들어드릴 수도 있어요)")
     tg.send_message(chat_id, "\n\n".join(lines))
