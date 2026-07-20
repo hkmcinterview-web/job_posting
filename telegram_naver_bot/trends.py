@@ -56,12 +56,12 @@ def search_naver_news(keyword: str, count: int = 8, hours: int = 48) -> list:
 
     returns [{"title","link","count","pubDate"}]  (count = 비슷한 보도 개수)
     """
-    if not (config.NAVER_CLIENT_ID and config.NAVER_CLIENT_SECRET):
+    if not (config.NAVER_SEARCH_CLIENT_ID and config.NAVER_SEARCH_CLIENT_SECRET):
         raise RuntimeError("NAVER_CLIENT_ID/SECRET 이 .env 에 설정되어 있지 않습니다.")
 
     headers = {
-        "X-Naver-Client-Id": config.NAVER_CLIENT_ID,
-        "X-Naver-Client-Secret": config.NAVER_CLIENT_SECRET,
+        "X-Naver-Client-Id": config.NAVER_SEARCH_CLIENT_ID,
+        "X-Naver-Client-Secret": config.NAVER_SEARCH_CLIENT_SECRET,
     }
     resp = requests.get(
         "https://openapi.naver.com/v1/search/news.json",
@@ -69,7 +69,12 @@ def search_naver_news(keyword: str, count: int = 8, hours: int = 48) -> list:
         headers=headers, timeout=20,
     )
     if resp.status_code != 200:
-        raise RuntimeError(f"네이버 뉴스 검색 실패 (HTTP {resp.status_code}): {resp.text[:200]}")
+        hint = ""
+        if resp.status_code == 401 or '"024"' in resp.text or "Scope" in resp.text:
+            hint = ("\n➡️ 이 앱에 '검색' API 가 등록돼 있지 않아요. developers.naver.com → "
+                    "내 애플리케이션 → 'API 설정' → 사용 API 에 '검색' 을 추가하면 됩니다. "
+                    "(카페용과 별도 앱을 쓰려면 .env 에 NAVER_SEARCH_CLIENT_ID/SECRET 을 넣으세요)")
+        raise RuntimeError(f"네이버 뉴스 검색 실패 (HTTP {resp.status_code}): {resp.text[:200]}{hint}")
     items = resp.json().get("items", [])
 
     now = datetime.now()

@@ -1,6 +1,7 @@
 .env
 naver_tokens.json
 cards/
+chat_logos/
 fonts/
 __pycache__/
 *.pyc

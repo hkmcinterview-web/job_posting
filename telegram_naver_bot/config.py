@@ -37,6 +37,12 @@ NAVER_CAFE_MENU_ID = os.getenv("NAVER_CAFE_MENU_ID", "")   # 게시판 숫자 ID
 NAVER_CAFE_JOB_MENU_ID = os.getenv("NAVER_CAFE_JOB_MENU_ID", "")
 NAVER_TOKEN_FILE = BASE_DIR / "naver_tokens.json"
 
+# 네이버 '검색' API('뉴스' 명령용)는 '검색' 스코프가 있는 애플리케이션이 필요합니다.
+# 카페 글쓰기용 앱에 '검색'을 추가했다면 위의 NAVER_CLIENT_ID/SECRET 이 그대로 쓰입니다.
+# 검색을 별도 앱으로 쓰고 싶으면 아래 두 값을 .env 에 채우세요(비우면 위 값 사용).
+NAVER_SEARCH_CLIENT_ID = os.getenv("NAVER_SEARCH_CLIENT_ID", "") or NAVER_CLIENT_ID
+NAVER_SEARCH_CLIENT_SECRET = os.getenv("NAVER_SEARCH_CLIENT_SECRET", "") or NAVER_CLIENT_SECRET
+
 # ── NewsAPI.org (선택 — '헤드라인' 명령용) ─────────────────
 # newsapi.org 에서 무료 키 발급. 무료 등급은 하루 100회 + 기사 24시간 지연 제약이 있어
 # '지금 뜨는' 용도로는 '해외이슈'(구글 뉴스 RSS)가 더 낫지만, 깨끗한 JSON·이미지 URL이

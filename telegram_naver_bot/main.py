@@ -109,6 +109,10 @@ HELP_TEXT = (
     "  (공고 내용 전체 붙여넣기)\n"
     "  https://recruit.../apply\n"
     "  → (필요하면 이어서 사진 전송) → '완료' (또는 자동 진행)\n\n"
+    "🏷 회사 로고 등록 (채용 카드 우상단):\n"
+    "  로고 이미지(PNG 권장)를 '로고' 라는 캡션과 함께 사진으로 보내면 저장됩니다.\n"
+    "  이후 '채용' 카드 우상단에 그 로고가 크기에 맞게 들어갑니다.\n"
+    "  (회사가 바뀌면 새 로고를 보내 교체, '로고삭제' 로 회사명 뱃지로 복귀)\n\n"
     "🔗 단축주소 펼치기:\n"
     "  첫 줄에 '펼치기' 라고 쓰고, 단축주소(buly.kr 등)가 든 글을 넣으면\n"
     "  원본 주소로 펼친 전체 글을 그대로 돌려드립니다.\n\n"
@@ -207,7 +211,7 @@ def handle_news_search(tg: TelegramClient, chat_id: int, keyword: str):
     if not keyword:
         tg.send_message(chat_id, "⚠️ '뉴스' 뒤에 검색할 산업/키워드를 넣어주세요.\n예) 뉴스 자동차산업")
         return
-    if not (config.NAVER_CLIENT_ID and config.NAVER_CLIENT_SECRET):
+    if not (config.NAVER_SEARCH_CLIENT_ID and config.NAVER_SEARCH_CLIENT_SECRET):
         tg.send_message(chat_id, "ℹ️ 네이버 API(NAVER_CLIENT_ID/SECRET)가 .env 에 없어 뉴스 검색을 할 수 없어요.")
         return
 
@@ -361,6 +365,60 @@ def handle_headlines(tg: TelegramClient, chat_id: int, rest: str):
 
 # ── 채용공고 카드 + 카페 게시 ─────────────────────────────
 
+LOGO_DIR = config.BASE_DIR / "chat_logos"
+
+
+def _chat_logo_path(chat_id: int):
+    return LOGO_DIR / f"{chat_id}.png"
+
+
+def _save_chat_logo(tg, chat_id: int, file_ids: list):
+    """사용자가 '로고' 캡션과 함께 보낸 이미지를 이 채팅의 로고로 저장한다."""
+    import io
+
+    from PIL import Image
+    if not file_ids:
+        tg.send_message(chat_id, "⚠️ 로고 이미지를 못 받았어요. 로고 PNG 를 '로고' 캡션과 함께 보내주세요.")
+        return
+    fid = file_ids[0][0]   # (file_id, mime) 튜플의 file_id
+    try:
+        raw = tg.download_file(fid)
+        img = Image.open(io.BytesIO(raw)).convert("RGBA")
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 로고 이미지를 열지 못했어요: {e}")
+        return
+    LOGO_DIR.mkdir(parents=True, exist_ok=True)
+    img.save(_chat_logo_path(chat_id), "PNG")
+    tg.send_message(chat_id,
+                    "✅ 로고 저장 완료! 앞으로 '채용' 카드 우상단에 이 로고를 넣어드릴게요.\n"
+                    "회사가 바뀌면 새 로고를 '로고' 캡션과 함께 보내면 교체됩니다.\n"
+                    "('로고삭제' 라고 보내면 다시 회사명 뱃지로 돌아가요)")
+
+
+def _load_chat_logo(chat_id: int):
+    """저장된 이 채팅의 로고를 PIL 이미지로 불러온다 (없으면 None)."""
+    p = _chat_logo_path(chat_id)
+    if not p.exists():
+        return None
+    try:
+        from PIL import Image
+        return Image.open(p)
+    except Exception as e:
+        print(f"[main] 저장된 로고 열기 실패: {e}")
+        return None
+
+
+def _clear_chat_logo(chat_id: int) -> bool:
+    p = _chat_logo_path(chat_id)
+    try:
+        if p.exists():
+            p.unlink()
+            return True
+    except Exception as e:
+        print(f"[main] 로고 삭제 실패: {e}")
+    return False
+
+
 def _fetch_logo(page: dict):
     """공고 페이지에서 회사 로고 이미지를 받아온다 (실패하면 None → 회사명 뱃지로 대체)."""
     import io
@@ -389,7 +447,9 @@ def _handle_one_job(tg: TelegramClient, chat_id: int, page: dict, idx: int,
         return
 
     # 1) 카드 렌더링 → 텔레그램 전송
-    path = render_job_card(job, f"job_{int(time.time())}_{idx}", logo=_fetch_logo(page))
+    #    사용자가 '로고' 로 등록한 이미지가 있으면 그걸 최우선으로, 없으면 공고 페이지에서 시도.
+    logo_img = _load_chat_logo(chat_id) or _fetch_logo(page)
+    path = render_job_card(job, f"job_{int(time.time())}_{idx}", logo=logo_img)
     caption = " ".join(t.strip() for t in (job.get("title") or "").split("/"))
     tg.send_photo(chat_id, path, caption=caption[:80])
 
@@ -781,6 +841,15 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_global_issues(tg, chat_id, content)
     elif mode == "headline":
         handle_headlines(tg, chat_id, content)
+    elif mode == "logo":
+        tg.send_message(chat_id,
+                        "🖼 로고를 등록하려면, 로고 이미지(PNG 권장)를 '로고' 라는 캡션과 함께 "
+                        "사진으로 보내주세요. 그러면 다음 '채용' 카드부터 우상단에 넣어드려요.")
+    elif mode == "logo_clear":
+        if _clear_chat_logo(chat_id):
+            tg.send_message(chat_id, "✅ 저장된 로고를 지웠어요. 이제 채용 카드는 회사명 뱃지로 나갑니다.")
+        else:
+            tg.send_message(chat_id, "ℹ️ 저장된 로고가 없어요.")
     else:
         tg.send_message(chat_id, HELP_TEXT)
 
@@ -977,7 +1046,10 @@ def main():
                 tg.send_message(cid, "⏳ 지금 앞의 작업을 처리하고 있어요. 멈추려면 '취소' 라고 보내주세요.")
                 continue
             mode, rest = detect_mode(g["caption"])
-            if mode == "job":
+            if mode == "logo":
+                # '로고' 캡션이 달린 사진 — 회사 로고로 저장 (공고 내용 분석에는 안 씀)
+                _save_chat_logo(tg, cid, g["file_ids"])
+            elif mode == "job":
                 _start_work(tg, cid, handle_job_photos, rest, g["file_ids"])
             elif cid in PENDING_JOB:
                 # 방금 보낸 채용공고 텍스트를 이어서 보충하는 사진 (캡션 없이 보내도 됨)
