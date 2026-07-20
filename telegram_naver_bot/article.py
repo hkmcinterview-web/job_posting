@@ -43,9 +43,23 @@ def _clean_source(name: str) -> str:
     return name
 
 
+def _get_html(url: str):
+    """느린/방어적인 해외 사이트 대비 — (연결 10초, 읽기 30초) + 1회 재시도."""
+    last_err = None
+    for attempt in range(2):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=(10, 30),
+                                allow_redirects=True)
+            resp.raise_for_status()
+            return resp
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            last_err = e
+            print(f"[article] {url} 요청 실패(재시도 {attempt+1}/2): {e}")
+    raise last_err
+
+
 def fetch_article(url: str) -> dict:
-    resp = requests.get(url, headers=HEADERS, timeout=20, allow_redirects=True)
-    resp.raise_for_status()
+    resp = _get_html(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
     def og(prop):

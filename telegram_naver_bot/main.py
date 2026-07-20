@@ -760,7 +760,16 @@ def _advance(tg: TelegramClient, chat_id: int):
     try:
         art = fetch_article(url)
     except Exception as e:
-        tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 수집 실패({url}): {e}")
+        emsg = str(e)
+        hint = ""
+        if "timed out" in emsg.lower() or "timeout" in emsg.lower() or "ConnectionError" in emsg:
+            hint = ("\n➡️ 이 언론사(특히 WaPo·NYT·WSJ 등 해외 유료매체)는 자동 읽기를 "
+                    "막거나 응답이 느려요. 유료/차단 없는 매체(로이터·AP·BBC·연합뉴스 등)나 "
+                    "그 뉴스를 다룬 국내 기사 링크로 바꿔서 다시 시도해보세요.")
+        elif "news.google.com" in url:
+            hint = ("\n➡️ 구글 뉴스 링크는 실제 기사로 넘어가는 '리다이렉트 주소'라 본문을 "
+                    "못 읽을 때가 많아요. 링크를 눌러 들어간 뒤 나오는 원문 언론사 주소로 다시 시도해보세요.")
+        tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 수집 실패({url}): {e}{hint}")
         _advance(tg, chat_id)
         return
 
