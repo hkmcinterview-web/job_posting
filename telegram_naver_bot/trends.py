@@ -49,13 +49,9 @@ def _tokenize(title: str) -> set:
     return {w for w in _WORD_RE.split(title) if len(w) >= 2}
 
 
-def search_naver_news(keyword: str, count: int = 8, hours: int = 48) -> list:
-    """네이버 뉴스 검색 — keyword 관련 최근(hours 이내) 기사 중, 제목이 비슷한
-    (=같은 소식을 여러 언론사가 다룬) 기사가 많을수록 화제성이 높다고 보고
-    그 순서로 정렬해 상위 count 개를 반환한다.
-
-    returns [{"title","link","count","pubDate"}]  (count = 비슷한 보도 개수)
-    """
+def _fetch_naver_news_items(query: str, hours: int = 72, display: int = 100) -> list:
+    """네이버 뉴스 검색 원본 아이템을 최근 hours 이내로 걸러 반환(공용 헬퍼).
+    returns [{"title","link","pubDate","desc"}]"""
     if not (config.NAVER_SEARCH_CLIENT_ID and config.NAVER_SEARCH_CLIENT_SECRET):
         raise RuntimeError("NAVER_CLIENT_ID/SECRET 이 .env 에 설정되어 있지 않습니다.")
 
@@ -65,7 +61,7 @@ def search_naver_news(keyword: str, count: int = 8, hours: int = 48) -> list:
     }
     resp = requests.get(
         "https://openapi.naver.com/v1/search/news.json",
-        params={"query": keyword, "display": 100, "start": 1, "sort": "date"},
+        params={"query": query, "display": display, "start": 1, "sort": "date"},
         headers=headers, timeout=20,
     )
     if resp.status_code != 200:
@@ -78,7 +74,7 @@ def search_naver_news(keyword: str, count: int = 8, hours: int = 48) -> list:
     items = resp.json().get("items", [])
 
     now = datetime.now()
-    candidates = []
+    out = []
     for it in items:
         pub = None
         try:
@@ -88,12 +84,25 @@ def search_naver_news(keyword: str, count: int = 8, hours: int = 48) -> list:
         except Exception:
             pass
         if pub and (now - pub) > timedelta(hours=hours):
-            continue   # 너무 오래된 기사는 화제성 판단에서 제외
+            continue   # 너무 오래된 기사는 제외
         title = _clean(it.get("title", ""))
         link = it.get("link") or it.get("originallink") or ""
         if not title or not link:
             continue
-        candidates.append({"title": title, "link": link, "pubDate": it.get("pubDate", "")})
+        out.append({"title": title, "link": link,
+                    "pubDate": it.get("pubDate", ""),
+                    "desc": _clean(it.get("description", ""))})
+    return out
+
+
+def search_naver_news(keyword: str, count: int = 8, hours: int = 48) -> list:
+    """네이버 뉴스 검색 — keyword 관련 최근(hours 이내) 기사 중, 제목이 비슷한
+    (=같은 소식을 여러 언론사가 다룬) 기사가 많을수록 화제성이 높다고 보고
+    그 순서로 정렬해 상위 count 개를 반환한다.
+
+    returns [{"title","link","count","pubDate"}]  (count = 비슷한 보도 개수)
+    """
+    candidates = _fetch_naver_news_items(keyword, hours=hours)
 
     # 제목 단어 겹침으로 '같은 소식'을 묶어서, 커버리지(보도 언론사 수)로 화제성 근사
     clusters = []
@@ -120,6 +129,144 @@ def search_naver_news(keyword: str, count: int = 8, hours: int = 48) -> list:
 
     clusters.sort(key=lambda c: c["count"], reverse=True)
     return clusters[:count]
+
+
+# ── 공대/이공계 취준생 관심 뉴스 발굴 ──────────────────────────
+# 신호를 두 축으로 나눈다:
+#  ① 관련성(우리 채널 주제인가) — 이공계 산업/기업/기술
+#  ② 공유성(저장·공유할 맛인가) — 채용/열망 키워드
+# 둘 다 걸리는 '교집합'이 스윗스팟. 여기에 실제 신호(보도 언론사 수·최신성)를 더해 점수화.
+# ⚠️ 아래 키워드는 '씨앗'일 뿐, 이후 인스타 성과 데이터로 가중치를 조정할 예정.
+_RELEVANCE_TERMS = (
+    "현대차", "현대자동차", "기아", "제네시스", "현대모비스", "완성차", "자동차", "모빌리티",
+    "전기차", "자율주행", "삼성전자", "삼성", "SK하이닉스", "하이닉스", "LG에너지솔루션",
+    "LG전자", "포스코", "한화", "HD현대", "두산", "한국항공우주", "현대중공업",
+    "반도체", "배터리", "이차전지", "2차전지", "디스플레이", "조선", "방산", "화학",
+    "정유", "철강", "수소", "원전", "로봇", "바이오", "인공지능", "AI",
+    "계약학과", "공대", "공과대학", "이공계", "산학협력", "카이스트", "포스텍",
+)
+_SHARE_TERMS = (
+    "채용", "공채", "채용연계", "채용형", "계약학과", "신입", "인턴", "일자리", "정규직",
+    "취업", "취준", "인재양성", "초봉", "연봉", "성과급", "상여", "보너스", "복지",
+    "임금", "증설", "신공장", "투자", "조 원", "조원", "대규모",
+)
+_SEED_QUERIES = (
+    "채용연계형 계약학과", "대기업 공채", "반도체 채용", "배터리 채용",
+    "완성차 채용", "이공계 신입 채용", "대기업 성과급", "산학협력 인재양성",
+)
+
+
+def _keyword_hits(text: str, terms) -> list:
+    t = text or ""
+    seen, hits = set(), []
+    for w in terms:
+        if w in t and w not in seen:
+            seen.add(w)
+            hits.append(w)
+    return hits
+
+
+def discover_hot_news(extra_keyword: str = "", count: int = 8, hours: int = 72) -> list:
+    """공대/이공계 취준생이 저장·공유할 만한 뉴스를 여러 신호로 점수화해 추천.
+
+    점수 = 보도 언론사 수(화제성) + 관련성 키워드 + 공유성 키워드 + 교집합 보너스 + 최신성.
+    extra_keyword 를 주면 그 분야로 좁혀서 검색한다(예: '배터리').
+    returns [{"title","link","score","reasons","coverage","pubDate"}]
+    """
+    extra_keyword = (extra_keyword or "").strip()
+    if extra_keyword:
+        queries = [f"{extra_keyword} 채용", f"{extra_keyword} 투자",
+                   f"{extra_keyword} 신입", f"{extra_keyword} 성과급", extra_keyword]
+    else:
+        queries = list(_SEED_QUERIES)
+
+    pool, by_link, errors = [], {}, []
+    for q in queries:
+        try:
+            items = _fetch_naver_news_items(q, hours=hours)
+        except Exception as e:
+            errors.append(str(e))
+            continue
+        for it in items:
+            if it["link"] in by_link:
+                by_link[it["link"]]["cross"] += 1   # 다른 검색어로 또 노출 = 화제성 가산
+                continue
+            it["cross"] = 1
+            by_link[it["link"]] = it
+            pool.append(it)
+
+    if not pool:
+        if errors:
+            raise RuntimeError(errors[0])
+        return []
+
+    # 제목 겹침으로 같은 소식 묶어 보도 언론사 수(coverage) 근사
+    used = [False] * len(pool)
+    clusters = []
+    for i, a in enumerate(pool):
+        if used[i]:
+            continue
+        used[i] = True
+        aw = _tokenize(a["title"])
+        group = [a]
+        for j in range(i + 1, len(pool)):
+            if used[j] or not aw:
+                continue
+            bw = _tokenize(pool[j]["title"])
+            if bw and len(aw & bw) / max(1, min(len(aw), len(bw))) >= 0.5:
+                group.append(pool[j])
+                used[j] = True
+        rep = group[0]
+        coverage = len(group) + sum(g.get("cross", 1) - 1 for g in group)
+        clusters.append({**rep, "coverage": coverage})
+
+    now = datetime.now()
+    scored = []
+    for c in clusters:
+        text = f"{c['title']} {c.get('desc', '')}"
+        rel = _keyword_hits(text, _RELEVANCE_TERMS)
+        shr = _keyword_hits(text, _SHARE_TERMS)
+        # 관련성(우리 채널 주제)이 하나도 없으면 off-topic — 아예 제외.
+        # (성과급·보너스 같은 공유성 키워드만 걸린 연예/스포츠 기사 노이즈 차단)
+        if not rel:
+            continue
+        reasons, score = [], 0
+
+        cov = min(c["coverage"], 6)
+        score += cov * 3
+        if c["coverage"] >= 2:
+            reasons.append(f"보도 {c['coverage']}건")
+
+        score += min(len(rel), 3) * 2
+        if rel:
+            reasons.append("관련:" + "·".join(rel[:2]))
+        score += min(len(shr), 3) * 2
+        if shr:
+            reasons.append("공유:" + "·".join(shr[:2]))
+        if rel and shr:                      # 우리 주제 × 공유할 맛 = 스윗스팟
+            score += 4
+            reasons.append("★교집합")
+
+        pub = None
+        try:
+            pub = parsedate_to_datetime(c.get("pubDate", ""))
+            if pub and pub.tzinfo:
+                pub = pub.replace(tzinfo=None)
+        except Exception:
+            pass
+        if pub:
+            age_h = (now - pub).total_seconds() / 3600
+            if age_h <= 24:
+                score += 3
+            elif age_h <= 48:
+                score += 1
+
+        scored.append({"title": c["title"], "link": c["link"], "score": score,
+                       "reasons": reasons, "coverage": c["coverage"],
+                       "pubDate": c.get("pubDate", "")})
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return [s for s in scored if s["score"] > 0][:count]
 
 
 def fetch_google_trends(geo: str = "KR", count: int = 10) -> list:

@@ -72,7 +72,7 @@ from job_card import render_job_card
 from job_summary import build_job_data
 from linkutil import expand_short_links
 from message_parser import URL_RE, detect_mode, extract_links, split_title_body
-from trends import (fetch_google_news_top, fetch_google_trends,
+from trends import (discover_hot_news, fetch_google_news_top, fetch_google_trends,
                     fetch_naver_news_ranking, fetch_newsapi_top, search_naver_news)
 from naver_cafe import post_article
 from summarize import build_card_options
@@ -116,6 +116,10 @@ HELP_TEXT = (
     "🔗 단축주소 펼치기:\n"
     "  첫 줄에 '펼치기' 라고 쓰고, 단축주소(buly.kr 등)가 든 글을 넣으면\n"
     "  원본 주소로 펼친 전체 글을 그대로 돌려드립니다.\n\n"
+    "🎯 취준생 관심 뉴스 발굴 (저장·공유될 만한 기사 자동 점수화):\n"
+    "  '발굴' 이라고 보내면 공대/이공계 취준생이 좋아할 뉴스를 점수순으로 추천합니다.\n"
+    "  (보도 언론사 수 + 채용·투자·산학 키워드 + 최신성 종합)\n"
+    "  분야를 좁히려면 '발굴 반도체', '발굴 배터리' 처럼 뒤에 키워드를 붙이세요.\n\n"
     "📰 뉴스 검색 (산업/키워드 화제 기사 찾기):\n"
     "  '뉴스' + 키워드 — 최근 화제 기사를 언론사 보도 개수 순으로 추천합니다.\n"
     "  예) 뉴스 자동차산업\n\n"
@@ -231,6 +235,35 @@ def handle_news_search(tg: TelegramClient, chat_id: int, keyword: str):
         tag = f" — 언론사 {r['count']}곳 보도" if r["count"] > 1 else ""
         lines.append(f"{i}. {r['title']}{tag}\n{r['link']}")
     lines.append("\n마음에 드는 링크를 복사해서 '카드' 또는 '채용' 뒤에 붙이면 바로 쓸 수 있어요.")
+    tg.send_message(chat_id, "\n\n".join(lines))
+
+
+def handle_discover(tg: TelegramClient, chat_id: int, keyword: str):
+    """공대/이공계 취준생이 저장·공유할 만한 뉴스를 여러 신호로 점수화해 추천."""
+    if not (config.NAVER_SEARCH_CLIENT_ID and config.NAVER_SEARCH_CLIENT_SECRET):
+        tg.send_message(chat_id, "ℹ️ 네이버 검색 API 키가 없어 발굴을 할 수 없어요. ('뉴스' 명령과 같은 키)")
+        return
+    kw = (keyword or "").strip()
+    label = f"'{kw}' " if kw else ""
+    tg.send_message(chat_id, f"⏳ 공대/이공계 취준생 관심 {label}뉴스를 발굴하는 중... "
+                             "(여러 검색어를 훑어서 점수를 매겨요)")
+    try:
+        results = discover_hot_news(extra_keyword=kw, count=8)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 발굴 실패: {e}")
+        return
+    if not results:
+        tg.send_message(chat_id, "지금은 조건에 맞는 화제 기사를 못 찾았어요. "
+                                 "잠시 후 다시 하거나 '발굴 배터리' 처럼 분야를 좁혀보세요.")
+        return
+
+    lines = ["🎯 취준생 관심 뉴스 후보 (점수순)"]
+    for i, r in enumerate(results, 1):
+        why = " · ".join(r["reasons"]) if r["reasons"] else ""
+        why = f"\n   ({why})" if why else ""
+        lines.append(f"{i}. [{r['score']}점] {r['title']}{why}\n{r['link']}")
+    lines.append("\n마음에 드는 링크를 '카드' 또는 '채용' 뒤에 붙이면 바로 만들 수 있어요.\n"
+                "특정 분야만 보려면 '발굴 반도체' 처럼 뒤에 키워드를 붙이세요.")
     tg.send_message(chat_id, "\n\n".join(lines))
 
 
@@ -850,6 +883,8 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_global_issues(tg, chat_id, content)
     elif mode == "headline":
         handle_headlines(tg, chat_id, content)
+    elif mode == "discover":
+        handle_discover(tg, chat_id, content)
     elif mode == "logo":
         tg.send_message(chat_id,
                         "🖼 로고를 등록하려면, 로고 이미지(PNG 권장)를 '로고' 라는 캡션과 함께 "
