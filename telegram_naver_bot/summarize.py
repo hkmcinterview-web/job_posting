@@ -65,8 +65,12 @@ def _build_prompt(article: dict, n_options: int) -> str:
         "- 1~2문장 핵심 요약 + 취준생 관점 시사점 1문장\n"
         "- 마지막 줄에 검색용 해시태그 6~8개 (예: #자동차산업 #현대차 #취준 ...)\n\n"
         "내용 규칙:\n"
-        "- ⚠️ 기사가 영어 등 외국어면, 내용을 이해해서 한국어로 자연스럽게 옮겨 쓰세요 "
-        "(원문 언어를 그대로 두지 말 것 — 모든 카드/요약/캡션은 한국어로)\n"
+        "- ⚠️⚠️ 모든 출력(요약·배경·전망·캡션·헤드라인·해시태그)은 반드시 '한국어'로만 작성하세요. "
+        "영어 고유명사/약어(AI, RX, SK, EV 등)는 그대로 써도 되지만, "
+        "중국어(汉字 문장)·일본어(かな) 등 다른 언어는 절대 쓰지 마세요. "
+        "기사가 외국어면 한국어로 번역해서 쓰고, 해시태그도 한국어로 다세요.\n"
+        "- ⚠️ HEADLINE 아래에는 실제 헤드라인 문장만 한 줄씩 쓰고, "
+        "'(첫째 줄)', '(둘째 줄)' 같은 표시/라벨은 절대 쓰지 마세요.\n"
         "- ⚠️ 기사 제목을 그대로 베끼지 말 것! 본문 내용을 파악해서 새로 쓴 센스있는 문장이어야 함\n"
         "- HEADLINE 은 2~3줄, 각 줄 8~14자, 줄바꿈 위치는 의미 단위로 자연스럽게\n"
         "- 첫 줄은 후킹하는 한마디(반응/요점), 이어지는 줄에서 핵심 사실 전달\n"
@@ -102,9 +106,9 @@ def _build_prompt(article: dict, n_options: int) -> str:
         "HIGHLIGHT: (강조할 한 줄)\n"
         "STYLE: marker 또는 color\n"
         "HEADLINE:\n"
-        "(첫째 줄)\n"
-        "(둘째 줄)\n"
-        "(셋째 줄, 필요하면)\n"
+        "헤드라인 첫 줄\n"
+        "헤드라인 둘째 줄\n"
+        "헤드라인 셋째 줄(필요할 때만)\n"
         "<<<END>>>\n"
         f"(CARD 블록을 총 {n_options}번 반복)\n\n"
         f"[기사 제목] {article.get('title', '')}\n"
@@ -118,6 +122,20 @@ _CARD_BLOCK_RE = re.compile(r"<{2,3}\s*CARD\s*>{2,3}(.*?)<{2,3}\s*END\s*>{2,3}",
 _SUMMARY_BLOCK_RE = re.compile(r"<{2,3}\s*SUMMARY\s*>{2,3}(.*?)<{2,3}\s*END\s*>{2,3}",
                                re.DOTALL | re.IGNORECASE)
 _HEADLINE_LABEL_RE = re.compile(r"HEADLINE\s*:\s*\n?", re.IGNORECASE)
+# 모델이 프롬프트의 자리표시자를 그대로 베낀 경우 제거 — 예: "(첫째 줄) 삼성전자," → "삼성전자,"
+_LINE_MARKER_RE = re.compile(r"^\s*\((?:[^)]*줄[^)]*|헤드라인[^)]*)\)\s*")
+
+
+def _clean_headline(headline: str) -> str:
+    """헤드라인 각 줄에서 '(첫째 줄)' 류 표시 문구와 앞뒤 공백을 제거하고 빈 줄은 버린다."""
+    out = []
+    for ln in (headline or "").split("\n"):
+        ln = _LINE_MARKER_RE.sub("", ln).strip()
+        # 줄 전체가 '헤드라인 첫 줄' 같은 자리표시자면 버린다
+        if ln and ln not in ("헤드라인 첫 줄", "헤드라인 둘째 줄", "헤드라인 셋째 줄",
+                             "헤드라인 셋째 줄(필요할 때만)"):
+            out.append(ln)
+    return "\n".join(out)
 _TAG_RE = re.compile(r"^\s*TAG\s*:\s*(.*)$", re.IGNORECASE)
 _HIGHLIGHT_RE = re.compile(r"^\s*HIGHLIGHT\s*:\s*(.*)$", re.IGNORECASE)
 _STYLE_RE = re.compile(r"^\s*STYLE\s*:\s*(.*)$", re.IGNORECASE)
@@ -164,6 +182,7 @@ def _extract_cards(text: str) -> list:
         head_label = _HEADLINE_LABEL_RE.search(block)
         meta = block[:head_label.start()] if head_label else block
         headline = block[head_label.end():].strip("\n").strip() if head_label else ""
+        headline = _clean_headline(headline)
 
         tag = highlight = style = ""
         for line in meta.split("\n"):
@@ -237,6 +256,28 @@ def build_card_options(article: dict, n_options: int = 3):
     return _build_cards_heuristic(article), "heuristic", error, heuristic_extras
 
 
+def _has_language_drift(text: str) -> bool:
+    """생성 결과가 한국어를 벗어나 중국어(한자)/일본어(가나)로 흘렀는지 감지.
+    한국어 카드에 일본어 가나가 나오거나, 한자가 한글 대비 과도하면 이탈로 본다."""
+    if not text:
+        return False
+    hangul = cjk = kana = 0
+    for ch in text:
+        o = ord(ch)
+        if 0xAC00 <= o <= 0xD7A3:
+            hangul += 1
+        elif 0x4E00 <= o <= 0x9FFF:      # CJK 한자 (주로 중국어)
+            cjk += 1
+        elif 0x3040 <= o <= 0x30FF:      # 일본어 히라가나/가타카나
+            kana += 1
+    if kana > 0:
+        return True
+    # 한자가 8자 이상이고 한글보다 절반 넘게 많으면 중국어로 이탈한 것으로 판단
+    if cjk >= 8 and cjk > max(1, hangul) * 0.5:
+        return True
+    return False
+
+
 # ── ① 구글 Gemini (무료 등급) ────────────────────────────
 
 def _gemini_generate(prompt: str, temperature: float = 0.9, images=None) -> str:
@@ -289,7 +330,13 @@ def _gemini_generate(prompt: str, temperature: float = 0.9, images=None) -> str:
             if not candidates:
                 raise RuntimeError(f"응답 비어있음(안전필터 가능): {str(data)[:200]}")
             parts = candidates[0].get("content", {}).get("parts", [])
-            return "".join(p.get("text", "") for p in parts)
+            out = "".join(p.get("text", "") for p in parts)
+            if _has_language_drift(out):
+                # 이 모델이 중국어/일본어로 이탈 — 결과 버리고 다음 모델/키로 재시도
+                last_err = f"키{ki} 모델 '{model}' 출력이 한국어를 벗어남(중국어/일본어)"
+                print(f"[summarize] {last_err} — 다음 모델로 재시도")
+                continue
+            return out
 
     raise RuntimeError(last_err or "사용 가능한 Gemini 모델 없음")
 
