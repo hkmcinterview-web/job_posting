@@ -346,6 +346,75 @@ def _build_cards_gemini(prompt: str):
     return _extract_extras(text), _extract_cards(text)
 
 
+# ── OpenRouter (무료 오픈모델 — '비교' 전용) ──────────────────
+
+def _openrouter_generate(prompt: str, model: str, temperature: float = 0.9) -> str:
+    """OpenRouter 로 무료 오픈모델(Qwen·Llama·DeepSeek 등)에 프롬프트를 보낸다.
+    model 은 ':free' 로 끝나는 무료 모델 ID 여야 과금 위험이 없다."""
+    if not config.OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY 가 설정되지 않음")
+    resp = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={"Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+                 "Content-Type": "application/json",
+                 "X-Title": "jobnyou-cardnews-bot"},
+        json={"model": model,
+              "messages": [{"role": "user", "content": prompt}],
+              "temperature": temperature},
+        timeout=60,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+    choices = resp.json().get("choices", [])
+    if not choices:
+        raise RuntimeError("응답에 결과 없음(모델 사용량 초과/ID 변경 가능)")
+    return choices[0].get("message", {}).get("content", "") or ""
+
+
+def _compare_order(models) -> list:
+    return ["Gemini"] + [f"{m.split('/')[-1].replace(':free', '')} (OpenRouter)"
+                         for m in models]
+
+
+def compare_card_options(article: dict, n_options: int = 3) -> list:
+    """같은 카드 프롬프트를 Gemini + OpenRouter 무료 모델들에 '병렬'로 돌려 비교.
+    returns [{"provider","options","error"}]  (모델별 헤드라인 후보)"""
+    import concurrent.futures
+
+    n_options = max(2, min(3, n_options))
+    prompt = _build_prompt(article, n_options)
+
+    jobs = []   # (label, callable)
+    if config.GEMINI_API_KEY:
+        jobs.append(("Gemini", lambda: _gemini_generate(prompt)))
+    for model in config.OPENROUTER_MODELS:
+        short = model.split("/")[-1].replace(":free", "")
+        jobs.append((f"{short} (OpenRouter)",
+                     lambda m=model: _openrouter_generate(prompt, m)))
+
+    def _run(label, fn):
+        try:
+            text = fn()
+            if _has_language_drift(text):
+                return {"provider": label, "options": [],
+                        "error": "출력이 한국어를 벗어남(중국어/일본어)"}
+            return {"provider": label, "options": _extract_cards(text), "error": ""}
+        except Exception as e:
+            return {"provider": label, "options": [], "error": str(e)}
+
+    results = []
+    if not jobs:
+        return results
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as ex:
+        futs = [ex.submit(_run, lbl, fn) for lbl, fn in jobs]
+        for fut in concurrent.futures.as_completed(futs):
+            results.append(fut.result())
+
+    order = _compare_order(config.OPENROUTER_MODELS)
+    results.sort(key=lambda r: order.index(r["provider"]) if r["provider"] in order else 99)
+    return results
+
+
 # ── ② Claude API (유료) ──────────────────────────────────
 
 def _claude_generate(prompt: str, images=None) -> str:

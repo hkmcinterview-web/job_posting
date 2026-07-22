@@ -75,7 +75,7 @@ from message_parser import URL_RE, detect_mode, extract_links, split_title_body
 from trends import (discover_hot_news, fetch_google_news_top, fetch_google_trends,
                     fetch_naver_news_ranking, fetch_newsapi_top, search_naver_news)
 from naver_cafe import post_article
-from summarize import build_card_options
+from summarize import build_card_options, compare_card_options
 from telegram_client import TelegramClient
 
 HELP_TEXT = (
@@ -95,6 +95,10 @@ HELP_TEXT = (
     "  카드\n"
     "  https://n.news...\n"
     "  https://n.news...\n\n"
+    "🔬 모델 비교 (여러 무료 모델 품질 비교):\n"
+    "  '비교' + 뉴스 링크 1개 — Gemini와 OpenRouter 무료 모델들의 헤드라인을\n"
+    "  나란히 보여줍니다. (OPENROUTER_API_KEY 있으면 켜짐)\n"
+    "  예) 비교 https://n.news...\n\n"
     "💼 채용공고 카드 + 카페 게시:\n"
     "  ▸ 가장 추천: 공고 내용을 복사(Ctrl+A, Ctrl+C)해서 '채용' 뒤에 붙여넣고,\n"
     "    마지막 줄에 지원 링크도 함께 넣으세요 — 본문으로 카드를 만들고,\n"
@@ -265,6 +269,46 @@ def handle_discover(tg: TelegramClient, chat_id: int, keyword: str):
     lines.append("\n마음에 드는 링크를 '카드' 또는 '채용' 뒤에 붙이면 바로 만들 수 있어요.\n"
                 "특정 분야만 보려면 '발굴 반도체' 처럼 뒤에 키워드를 붙이세요.")
     tg.send_message(chat_id, "\n\n".join(lines))
+
+
+def handle_compare(tg: TelegramClient, chat_id: int, content: str):
+    """같은 뉴스 링크로 여러 무료 모델(Gemini + OpenRouter)의 헤드라인을 동시에 뽑아 비교."""
+    links = extract_links(content)
+    if not links:
+        tg.send_message(chat_id, "⚠️ '비교' 뒤에 뉴스 링크를 하나 넣어주세요.\n예) 비교 https://n.news...")
+        return
+    if not (config.GEMINI_API_KEY or config.OPENROUTER_API_KEY):
+        tg.send_message(chat_id, "ℹ️ 비교하려면 GEMINI_API_KEY 또는 OPENROUTER_API_KEY 가 .env 에 있어야 해요.")
+        return
+
+    url = links[0]
+    n_models = (1 if config.GEMINI_API_KEY else 0) + \
+               (len(config.OPENROUTER_MODELS) if config.OPENROUTER_API_KEY else 0)
+    tg.send_message(chat_id, f"⏳ 기사 수집 후 {n_models}개 모델로 동시에 만들어 비교할게요...")
+    try:
+        art = fetch_article(url)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 기사 수집 실패: {e}")
+        return
+
+    results = compare_card_options(art, N_OPTIONS)
+    if not results:
+        tg.send_message(chat_id, "비교할 모델이 없어요. (키 설정을 확인해주세요)")
+        return
+
+    lines = [f"🔬 모델별 헤드라인 비교\n📰 {art.get('title', '')[:50]}"]
+    for r in results:
+        lines.append(f"\n━━━━━━━━━━\n🤖 {r['provider']}")
+        if r["error"]:
+            lines.append(f"  ⚠️ {r['error']}")
+        elif not r["options"]:
+            lines.append("  (후보를 못 만들었어요)")
+        else:
+            for i, opt in enumerate(r["options"][:N_OPTIONS], 1):
+                hl = (opt.get("headline") or "").replace("\n", " / ")
+                lines.append(f"  {i}. {hl}")
+    lines.append("\n괜찮은 모델을 정하면 알려주세요 — 그 모델을 카드뉴스 기본으로 바꿔드릴게요.")
+    tg.send_message(chat_id, "\n".join(lines))
 
 
 _TREND_REGION_MAP = {
@@ -885,6 +929,8 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_headlines(tg, chat_id, content)
     elif mode == "discover":
         handle_discover(tg, chat_id, content)
+    elif mode == "compare":
+        handle_compare(tg, chat_id, content)
     elif mode == "logo":
         tg.send_message(chat_id,
                         "🖼 로고를 등록하려면, 로고 이미지(PNG 권장)를 '로고' 라는 캡션과 함께 "

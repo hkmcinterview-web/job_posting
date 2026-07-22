@@ -69,6 +69,18 @@ ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
+# ④ OpenRouter (선택 — '비교' 명령 전용, 무료 오픈모델 품질 비교) ─────
+# openrouter.ai 에서 무료 키 발급. ⚠️ 계정에 결제수단/크레딧을 넣지 않으면 과금 위험 0
+# (무료 모델만 되고 유료 모델은 그냥 실패). '비교' 명령이 이 키가 있을 때만 켜집니다.
+# 비교할 무료 모델 ID 목록(콤마 구분) — openrouter.ai/models 에서 'Free' 필터로 확인 후 갱신 가능.
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_MODELS = [m.strip() for m in os.getenv(
+    "OPENROUTER_MODELS",
+    "qwen/qwen-2.5-72b-instruct:free,"
+    "meta-llama/llama-3.3-70b-instruct:free,"
+    "deepseek/deepseek-chat:free"
+).split(",") if m.strip()]
+
 # ── 게시글/카드 설정 ─────────────────────────────────────
 BRAND_NAME = os.getenv("BRAND_NAME", "공대생현직자 잡앤유")
 POST_HEADER = os.getenv("POST_HEADER", "")   # 카페 글 상단에 붙는 문구 (HTML 허용)
