@@ -277,15 +277,16 @@ def handle_compare(tg: TelegramClient, chat_id: int, content: str):
     if not links:
         tg.send_message(chat_id, "⚠️ '비교' 뒤에 뉴스 링크를 하나 넣어주세요.\n예) 비교 https://n.news...")
         return
-    if not (config.GEMINI_API_KEY or config.OPENROUTER_API_KEY):
-        tg.send_message(chat_id, "ℹ️ 비교하려면 GEMINI_API_KEY 또는 OPENROUTER_API_KEY 가 .env 에 있어야 해요.")
+    if not (config.GEMINI_API_KEY or config.OPENROUTER_API_KEY or config.GROQ_API_KEY):
+        tg.send_message(chat_id, "ℹ️ 비교하려면 GEMINI_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY 중 하나 이상이 .env 에 있어야 해요.")
         return
 
     url = links[0]
     or_count = 0
     if config.OPENROUTER_API_KEY:
         or_count = len(config.OPENROUTER_MODELS) or config.OPENROUTER_AUTO_COUNT
-    n_models = (1 if config.GEMINI_API_KEY else 0) + or_count
+    groq_count = len(config.GROQ_MODELS) if config.GROQ_API_KEY else 0
+    n_models = (1 if config.GEMINI_API_KEY else 0) + groq_count + or_count
     tg.send_message(chat_id, f"⏳ 기사 수집 후 최대 {n_models}개 모델로 동시에 만들어 비교할게요...")
     try:
         art = fetch_article(url)

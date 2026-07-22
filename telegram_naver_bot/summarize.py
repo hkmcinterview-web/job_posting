@@ -348,16 +348,15 @@ def _build_cards_gemini(prompt: str):
 
 # ── OpenRouter (무료 오픈모델 — '비교' 전용) ──────────────────
 
-def _openrouter_generate(prompt: str, model: str, temperature: float = 0.9) -> str:
-    """OpenRouter 로 무료 오픈모델(Qwen·Llama·DeepSeek 등)에 프롬프트를 보낸다.
-    model 은 ':free' 로 끝나는 무료 모델 ID 여야 과금 위험이 없다."""
-    if not config.OPENROUTER_API_KEY:
-        raise RuntimeError("OPENROUTER_API_KEY 가 설정되지 않음")
+def _openai_chat(url: str, api_key: str, model: str, prompt: str,
+                 temperature: float, extra_headers: dict = None) -> str:
+    """OpenAI 호환 chat/completions 엔드포인트(OpenRouter·Groq 공용) 호출."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
     resp = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={"Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
-                 "Content-Type": "application/json",
-                 "X-Title": "jobnyou-cardnews-bot"},
+        url,
+        headers=headers,
         json={"model": model,
               "messages": [{"role": "user", "content": prompt}],
               "temperature": temperature},
@@ -369,6 +368,24 @@ def _openrouter_generate(prompt: str, model: str, temperature: float = 0.9) -> s
     if not choices:
         raise RuntimeError("응답에 결과 없음(모델 사용량 초과/ID 변경 가능)")
     return choices[0].get("message", {}).get("content", "") or ""
+
+
+def _openrouter_generate(prompt: str, model: str, temperature: float = 0.9) -> str:
+    """OpenRouter 로 무료 오픈모델(Qwen·Llama·DeepSeek 등)에 프롬프트를 보낸다.
+    model 은 ':free' 로 끝나는 무료 모델 ID 여야 과금 위험이 없다."""
+    if not config.OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY 가 설정되지 않음")
+    return _openai_chat("https://openrouter.ai/api/v1/chat/completions",
+                        config.OPENROUTER_API_KEY, model, prompt, temperature,
+                        {"X-Title": "jobnyou-cardnews-bot"})
+
+
+def _groq_generate(prompt: str, model: str, temperature: float = 0.9) -> str:
+    """Groq 로 무료 오픈모델(Llama·Gemma 등)에 프롬프트를 보낸다. 무료 한도가 넉넉하고 빠름."""
+    if not config.GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY 가 설정되지 않음")
+    return _openai_chat("https://api.groq.com/openai/v1/chat/completions",
+                        config.GROQ_API_KEY, model, prompt, temperature)
 
 
 def _openrouter_label(model: str) -> str:
@@ -433,11 +450,15 @@ def compare_card_options(article: dict, n_options: int = 3) -> list:
     n_options = max(2, min(3, n_options))
     prompt = _build_prompt(article, n_options)
 
+    groq_models = config.GROQ_MODELS if config.GROQ_API_KEY else []
     or_models = _resolve_openrouter_models() if config.OPENROUTER_API_KEY else []
 
     jobs = []   # (label, callable)
     if config.GEMINI_API_KEY:
         jobs.append(("Gemini", lambda: _gemini_generate(prompt)))
+    for model in groq_models:
+        jobs.append((f"{model.split('/')[-1]} (Groq)",
+                     lambda m=model: _groq_generate(prompt, m)))
     for model in or_models:
         jobs.append((_openrouter_label(model),
                      lambda m=model: _openrouter_generate(prompt, m)))
@@ -461,7 +482,9 @@ def compare_card_options(article: dict, n_options: int = 3) -> list:
         for fut in concurrent.futures.as_completed(futs):
             results.append(fut.result())
 
-    order = ["Gemini"] + [_openrouter_label(m) for m in or_models]
+    order = (["Gemini"]
+             + [f"{m.split('/')[-1]} (Groq)" for m in groq_models]
+             + [_openrouter_label(m) for m in or_models])
     results.sort(key=lambda r: order.index(r["provider"]) if r["provider"] in order else 99)
     return results
 

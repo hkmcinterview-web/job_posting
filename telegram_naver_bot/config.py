@@ -80,6 +80,16 @@ OPENROUTER_MODELS = [m.strip() for m in os.getenv("OPENROUTER_MODELS", "").split
 # 자동 탐색 시 몇 개까지 비교할지
 OPENROUTER_AUTO_COUNT = int(os.getenv("OPENROUTER_AUTO_COUNT", "3"))
 
+# ⑤ Groq (선택 — '비교'/'카드' 다중모델용) ────────────────────
+# console.groq.com 에서 무료 키 발급(카드 등록 불필요). 무료 한도가 넉넉하고 빠르며
+# OpenRouter 무료풀보다 429(사용량 초과)가 훨씬 적습니다. 비교할 모델 ID 는 콤마로.
+# 사용 가능한 모델은 console.groq.com/docs/models 에서 확인 후 갱신 가능.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODELS = [m.strip() for m in os.getenv(
+    "GROQ_MODELS",
+    "llama-3.3-70b-versatile,gemma2-9b-it"
+).split(",") if m.strip()]
+
 # ── 게시글/카드 설정 ─────────────────────────────────────
 BRAND_NAME = os.getenv("BRAND_NAME", "공대생현직자 잡앤유")
 POST_HEADER = os.getenv("POST_HEADER", "")   # 카페 글 상단에 붙는 문구 (HTML 허용)
