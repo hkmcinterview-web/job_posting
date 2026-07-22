@@ -790,8 +790,11 @@ def _format_model_choices(good: list, all_results: list) -> str:
             lines.append(f"   {mi}-{hi}. {tag}{headline}")
     failed = [r for r in all_results if not r.get("options")]
     if failed:
-        names = ", ".join(r["provider"].split(" (")[0] for r in failed)
-        lines.append(f"\n(제외된 모델: {names})")
+        lines.append("\n⚠️ 제외된 모델(사유):")
+        for r in failed:
+            name = r["provider"].split(" (")[0]
+            reason = (r.get("error") or "후보 없음").replace("\n", " ").strip()[:120]
+            lines.append(f"  · {name}: {reason}")
     lines.append("\n예) 1-2 → 첫 번째 모델의 2번 헤드라인")
     return "\n".join(lines)
 
