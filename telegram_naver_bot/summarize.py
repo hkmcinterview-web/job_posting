@@ -371,9 +371,58 @@ def _openrouter_generate(prompt: str, model: str, temperature: float = 0.9) -> s
     return choices[0].get("message", {}).get("content", "") or ""
 
 
-def _compare_order(models) -> list:
-    return ["Gemini"] + [f"{m.split('/')[-1].replace(':free', '')} (OpenRouter)"
-                         for m in models]
+def _openrouter_label(model: str) -> str:
+    return f"{model.split('/')[-1].replace(':free', '')} (OpenRouter)"
+
+
+# 한국어가 상대적으로 좋은 오픈모델 계열 — 자동 탐색 시 우선순위
+_KOREAN_FRIENDLY = ("qwen", "llama", "deepseek", "gemma", "mistral", "nemotron", "glm", "yi")
+
+
+def list_openrouter_free_models(limit: int = 3) -> list:
+    """OpenRouter 모델 목록 API 에서 '지금 가격이 0(무료)'인 모델만 골라 반환.
+    무료 모델 ID 가 수시로 바뀌므로 하드코딩 대신 실시간으로 찾는다.
+    한국어에 강한 계열(qwen·llama·deepseek·gemma…)을 우선, 컨텍스트 큰 순으로."""
+    if not config.OPENROUTER_API_KEY:
+        return []
+    resp = requests.get(
+        "https://openrouter.ai/api/v1/models",
+        headers={"Authorization": f"Bearer {config.OPENROUTER_API_KEY}"},
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"모델 목록 조회 실패 (HTTP {resp.status_code})")
+
+    ranked = []
+    for m in resp.json().get("data", []):
+        mid = m.get("id", "")
+        pricing = m.get("pricing", {}) or {}
+        try:
+            p = float(pricing.get("prompt", "0"))
+            c = float(pricing.get("completion", "0"))
+        except (TypeError, ValueError):
+            continue
+        if not mid or p != 0 or c != 0:
+            continue
+        low = mid.lower()
+        fam = next((len(_KOREAN_FRIENDLY) - i for i, f in enumerate(_KOREAN_FRIENDLY)
+                    if f in low), 0)
+        ctx = m.get("context_length") or 0
+        ranked.append((fam, ctx, mid))
+
+    ranked.sort(reverse=True)
+    return [mid for _, _, mid in ranked[:limit]]
+
+
+def _resolve_openrouter_models() -> list:
+    """비교에 쓸 OpenRouter 모델 결정 — .env 에 지정했으면 그걸, 아니면 무료 자동 탐색."""
+    if config.OPENROUTER_MODELS:
+        return config.OPENROUTER_MODELS
+    try:
+        return list_openrouter_free_models(config.OPENROUTER_AUTO_COUNT)
+    except Exception as e:
+        print(f"[summarize] OpenRouter 무료 모델 자동 탐색 실패: {e}")
+        return []
 
 
 def compare_card_options(article: dict, n_options: int = 3) -> list:
@@ -384,12 +433,13 @@ def compare_card_options(article: dict, n_options: int = 3) -> list:
     n_options = max(2, min(3, n_options))
     prompt = _build_prompt(article, n_options)
 
+    or_models = _resolve_openrouter_models() if config.OPENROUTER_API_KEY else []
+
     jobs = []   # (label, callable)
     if config.GEMINI_API_KEY:
         jobs.append(("Gemini", lambda: _gemini_generate(prompt)))
-    for model in config.OPENROUTER_MODELS:
-        short = model.split("/")[-1].replace(":free", "")
-        jobs.append((f"{short} (OpenRouter)",
+    for model in or_models:
+        jobs.append((_openrouter_label(model),
                      lambda m=model: _openrouter_generate(prompt, m)))
 
     def _run(label, fn):
@@ -410,7 +460,7 @@ def compare_card_options(article: dict, n_options: int = 3) -> list:
         for fut in concurrent.futures.as_completed(futs):
             results.append(fut.result())
 
-    order = _compare_order(config.OPENROUTER_MODELS)
+    order = ["Gemini"] + [_openrouter_label(m) for m in or_models]
     results.sort(key=lambda r: order.index(r["provider"]) if r["provider"] in order else 99)
     return results
 

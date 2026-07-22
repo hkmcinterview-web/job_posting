@@ -282,9 +282,11 @@ def handle_compare(tg: TelegramClient, chat_id: int, content: str):
         return
 
     url = links[0]
-    n_models = (1 if config.GEMINI_API_KEY else 0) + \
-               (len(config.OPENROUTER_MODELS) if config.OPENROUTER_API_KEY else 0)
-    tg.send_message(chat_id, f"⏳ 기사 수집 후 {n_models}개 모델로 동시에 만들어 비교할게요...")
+    or_count = 0
+    if config.OPENROUTER_API_KEY:
+        or_count = len(config.OPENROUTER_MODELS) or config.OPENROUTER_AUTO_COUNT
+    n_models = (1 if config.GEMINI_API_KEY else 0) + or_count
+    tg.send_message(chat_id, f"⏳ 기사 수집 후 최대 {n_models}개 모델로 동시에 만들어 비교할게요...")
     try:
         art = fetch_article(url)
     except Exception as e:

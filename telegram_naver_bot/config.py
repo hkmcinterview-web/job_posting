@@ -74,12 +74,11 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 # (무료 모델만 되고 유료 모델은 그냥 실패). '비교' 명령이 이 키가 있을 때만 켜집니다.
 # 비교할 무료 모델 ID 목록(콤마 구분) — openrouter.ai/models 에서 'Free' 필터로 확인 후 갱신 가능.
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-OPENROUTER_MODELS = [m.strip() for m in os.getenv(
-    "OPENROUTER_MODELS",
-    "qwen/qwen-2.5-72b-instruct:free,"
-    "meta-llama/llama-3.3-70b-instruct:free,"
-    "deepseek/deepseek-chat:free"
-).split(",") if m.strip()]
+# 비워두면(기본) 봇이 OpenRouter 에서 '지금 무료인 모델'을 자동으로 골라 씁니다
+# (무료 모델 ID 가 수시로 바뀌어서 자동 탐색이 안전). 특정 모델만 쓰고 싶으면 콤마로 나열.
+OPENROUTER_MODELS = [m.strip() for m in os.getenv("OPENROUTER_MODELS", "").split(",") if m.strip()]
+# 자동 탐색 시 몇 개까지 비교할지
+OPENROUTER_AUTO_COUNT = int(os.getenv("OPENROUTER_AUTO_COUNT", "3"))
 
 # ── 게시글/카드 설정 ─────────────────────────────────────
 BRAND_NAME = os.getenv("BRAND_NAME", "공대생현직자 잡앤유")
