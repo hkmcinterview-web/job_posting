@@ -446,11 +446,12 @@ def compare_card_options(article: dict, n_options: int = 3) -> list:
         try:
             text = fn()
             if _has_language_drift(text):
-                return {"provider": label, "options": [],
+                return {"provider": label, "options": [], "extras": {},
                         "error": "출력이 한국어를 벗어남(중국어/일본어)"}
-            return {"provider": label, "options": _extract_cards(text), "error": ""}
+            return {"provider": label, "options": _extract_cards(text),
+                    "extras": _extract_extras(text), "error": ""}
         except Exception as e:
-            return {"provider": label, "options": [], "error": str(e)}
+            return {"provider": label, "options": [], "extras": {}, "error": str(e)}
 
     results = []
     if not jobs:

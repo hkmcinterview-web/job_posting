@@ -90,14 +90,14 @@ HELP_TEXT = (
     "  https://n.news...\n\n"
     "🖼 카드뉴스 만들기:\n"
     "  첫 줄에 '카드' 라고 쓰고, 링크 1~3개를 넣으세요.\n"
-    "  링크마다 헤드라인 후보를 보여드리면 숫자로 골라주세요.\n"
+    "  여러 무료 모델(Gemini+OpenRouter)이 각각 헤드라인 후보를 만들어 보여드리면\n"
+    "  'N-M' 형식으로 골라주세요 (N=모델 번호, M=헤드라인 번호). 예) 1-2\n"
+    "  → 고른 모델의 내용으로 카드뉴스를 완성합니다.\n"
     "  예)\n"
     "  카드\n"
-    "  https://n.news...\n"
     "  https://n.news...\n\n"
-    "🔬 모델 비교 (여러 무료 모델 품질 비교):\n"
-    "  '비교' + 뉴스 링크 1개 — Gemini와 OpenRouter 무료 모델들의 헤드라인을\n"
-    "  나란히 보여줍니다. (OPENROUTER_API_KEY 있으면 켜짐)\n"
+    "🔬 모델 비교만 보기 (카드 안 만들고 헤드라인만 비교):\n"
+    "  '비교' + 뉴스 링크 1개 — 모델별 헤드라인만 나란히 보여줍니다.\n"
     "  예) 비교 https://n.news...\n\n"
     "💼 채용공고 카드 + 카페 게시:\n"
     "  ▸ 가장 추천: 공고 내용을 복사(Ctrl+A, Ctrl+C)해서 '채용' 뒤에 붙여넣고,\n"
@@ -778,12 +778,21 @@ def handle_job_photos(tg: TelegramClient, chat_id: int, caption_rest: str, file_
 
 # ── 카드뉴스 제작 (헤드라인 후보 선택 방식) ─────────────────
 
-def _format_options(options: list) -> str:
-    lines = ["📝 헤드라인 후보 — 숫자로 답장해서 골라주세요:"]
-    for i, opt in enumerate(options, 1):
-        headline = (opt.get("headline") or "").replace("\n", " / ")
-        tag = f"[{opt['tag']}] " if opt.get("tag") else ""
-        lines.append(f"{i}. {tag}{headline}")
+def _format_model_choices(good: list, all_results: list) -> str:
+    """모델별 헤드라인 후보를 'N-M' 으로 고르게 표시. (N=모델, M=헤드라인)"""
+    total = sum(len(r["options"][:N_OPTIONS]) for r in good)
+    lines = [f"📝 {len(good)}개 모델 · 헤드라인 {total}개 — 'N-M' 으로 골라주세요 (N=모델, M=헤드라인)"]
+    for mi, r in enumerate(good, 1):
+        lines.append(f"\n{mi}. 🤖 {r['provider']}")
+        for hi, opt in enumerate(r["options"][:N_OPTIONS], 1):
+            headline = (opt.get("headline") or "").replace("\n", " / ")
+            tag = f"[{opt['tag']}] " if opt.get("tag") else ""
+            lines.append(f"   {mi}-{hi}. {tag}{headline}")
+    failed = [r for r in all_results if not r.get("options")]
+    if failed:
+        names = ", ".join(r["provider"].split(" (")[0] for r in failed)
+        lines.append(f"\n(제외된 모델: {names})")
+    lines.append("\n예) 1-2 → 첫 번째 모델의 2번 헤드라인")
     return "\n".join(lines)
 
 
@@ -826,7 +835,7 @@ def _advance(tg: TelegramClient, chat_id: int):
     if not state:
         return
     state["article"] = None
-    state["options"] = None
+    state["choices"] = None
     state["extras"] = None
 
     if not state["queue"]:
@@ -852,26 +861,40 @@ def _advance(tg: TelegramClient, chat_id: int):
         _advance(tg, chat_id)
         return
 
+    # 여러 무료 모델(Gemini + OpenRouter)이 각각 헤드라인 후보를 만들어 한 번에 보여준다.
     try:
-        options, engine, err, extras = build_card_options(art, N_OPTIONS)
+        results = compare_card_options(art, N_OPTIONS)
     except Exception as e:
-        tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 요약 실패: {e}")
-        _advance(tg, chat_id)
-        return
+        results = []
+        print(f"[main] 모델 비교 생성 실패: {e}")
+    good = [r for r in results if r.get("options")]
 
-    state["extras"] = extras
-
-    if len(options) <= 1:
-        # AI 를 못 썼거나 실패 — 고를 필요 없이 바로 그 하나로 카드 생성
-        if engine == "heuristic" and (config.GEMINI_API_KEY or config.ANTHROPIC_API_KEY):
+    if not good:
+        # 모든 모델 실패 — 기존 폴백 체인(Claude/Ollama/휴리스틱)으로 최소 1장은 만든다
+        try:
+            options, engine, err, extras = build_card_options(art, N_OPTIONS)
+        except Exception as e:
+            tg.send_message(chat_id, f"⚠️ 링크 {state['link_idx']} 요약 실패: {e}")
+            _advance(tg, chat_id)
+            return
+        state["extras"] = extras
+        if engine == "heuristic" and (config.GEMINI_API_KEY or config.OPENROUTER_API_KEY):
             tg.send_message(chat_id, f"⚠️ AI 요약 실패로 기본 제목을 사용해요.\n사유: {err}")
         card = options[0] if options else {"headline": art.get("title", "")[:40]}
         _finish_link(tg, chat_id, card, art, state)
         return
 
+    total = sum(len(r["options"][:N_OPTIONS]) for r in good)
+    if total <= 1:
+        # 후보가 딱 하나뿐이면 고를 필요 없이 바로 생성
+        only = good[0]
+        state["extras"] = only.get("extras") or {}
+        _finish_link(tg, chat_id, only["options"][0], art, state)
+        return
+
     state["article"] = art
-    state["options"] = options
-    tg.send_message(chat_id, f"[링크 {state['link_idx']}] " + _format_options(options))
+    state["choices"] = good
+    tg.send_message(chat_id, f"[링크 {state['link_idx']}]\n" + _format_model_choices(good, results))
 
 
 def handle_card(tg: TelegramClient, chat_id: int, content: str):
@@ -886,24 +909,45 @@ def handle_card(tg: TelegramClient, chat_id: int, content: str):
         "made": 0,
         "stamp": int(time.time()),
         "article": None,
-        "options": None,
+        "choices": None,
         "extras": None,
     }
-    tg.send_message(chat_id, f"⏳ 카드뉴스 준비 중 — 링크 {len(links)}개")
+    tg.send_message(chat_id, f"⏳ 카드뉴스 준비 중 — 링크 {len(links)}개 (여러 모델이 헤드라인을 만들어요)")
     _advance(tg, chat_id)
 
 
 def _resolve_selection_work(tg, chat_id: int, text: str):
-    """후보 선택 숫자 답장을 워커에서 처리 — 선택한 헤드라인으로 카드 생성."""
+    """'N-M' 답장을 워커에서 처리 — N번 모델의 M번 헤드라인 + 그 모델 내용으로 카드 생성."""
     state = PENDING_CARD.get(chat_id)
-    if not state or not state.get("options"):
+    if not state or not state.get("choices"):
         return
-    options = state["options"]
-    m = re.match(r"\s*([1-9])", text.strip())
-    if not m or int(m.group(1)) > len(options):
-        tg.send_message(chat_id, f"1~{len(options)} 중에서 숫자로 골라주세요.")
+    choices = state["choices"]
+    t = text.strip()
+
+    m = re.match(r"\s*(\d+)\s*[-.\s]\s*(\d+)", t)
+    if m:
+        mi, hi = int(m.group(1)), int(m.group(2))
+    else:
+        # 모델이 하나뿐일 땐 단일 숫자도 그 모델의 헤드라인 번호로 받아줌
+        m2 = re.match(r"\s*(\d+)\s*$", t)
+        if m2 and len(choices) == 1:
+            mi, hi = 1, int(m2.group(1))
+        else:
+            tg.send_message(chat_id, "'N-M' 형식으로 골라주세요. 예) 1-2 (첫 번째 모델의 2번 헤드라인)")
+            return
+
+    if not (1 <= mi <= len(choices)):
+        tg.send_message(chat_id, f"모델 번호는 1~{len(choices)} 중에서 골라주세요.")
         return
-    chosen = options[int(m.group(1)) - 1]
+    model = choices[mi - 1]
+    opts = model["options"][:N_OPTIONS]
+    if not (1 <= hi <= len(opts)):
+        tg.send_message(chat_id, f"{mi}번 모델의 헤드라인은 1~{len(opts)} 중에서 골라주세요.")
+        return
+
+    chosen = opts[hi - 1]
+    state["extras"] = model.get("extras") or {}
+    tg.send_message(chat_id, f"✅ [{model['provider']}]의 {hi}번 헤드라인으로 카드뉴스를 만들게요.")
     _finish_link(tg, chat_id, chosen, state["article"], state)
 
 
@@ -1111,14 +1155,14 @@ def main():
                                              "멈추려면 '취소' 라고 보내주세요.")
                     continue
 
-                # 카드 후보 선택 대기 중 — 숫자 답장이면 그 카드로 진행(워커에서)
-                if chat_id in PENDING_CARD and PENDING_CARD[chat_id].get("options"):
-                    if re.match(r"\s*[1-9]", text):
+                # 카드 후보 선택 대기 중 — 'N-M'(또는 숫자) 답장이면 그 카드로 진행(워커에서)
+                if chat_id in PENDING_CARD and PENDING_CARD[chat_id].get("choices"):
+                    if re.match(r"\s*\d", text):
                         _start_work(tg, chat_id, _resolve_selection_work, text)
                     else:
                         PENDING_CARD.pop(chat_id, None)
                         tg.send_message(chat_id, "⚠️ 진행 중이던 선택은 취소하고 새 요청을 처리할게요. "
-                                                 "(후보를 고르려면 숫자만 답장해주세요)")
+                                                 "(후보를 고르려면 'N-M' 으로 답장해주세요)")
                         _start_work(tg, chat_id, handle_message, text)
                     continue
 
