@@ -327,18 +327,31 @@ def handle_compare(tg: TelegramClient, chat_id: int, content: str):
 
 _COMMENT_SEP_RE = re.compile(r"^\s*-{0,3}\s*(베스트\s*댓글|댓글들|댓글|comments?)\s*-{0,3}\s*$",
                              re.IGNORECASE | re.MULTILINE)
+# 링크(도메인) → 표시할 출처 이름
 _COMMUNITY_SITES = {
     "teamblind": "블라인드", "blind": "블라인드",
-    "cafe.naver": "네이버 카페", "rememberapp": "리멤버", "remember": "리멤버",
+    "cafe.naver": "네이버 카페",
+    "rememberapp": "리멤버 커뮤니티", "remember": "리멤버 커뮤니티",
     "fmkorea": "에펨코리아", "dcinside": "디시인사이드", "clien": "클리앙",
-    "ppomppu": "뽐뿌", "ruliweb": "루리웹",
+    "ppomppu": "뽐뿌", "ruliweb": "루리웹", "instiz": "인스티즈",
+    "theqoo": "더쿠", "82cook": "82쿡", "bobaedream": "보배드림", "arca.live": "아카라이브",
+}
+# 붙여넣은 글 안에 등장하는 한글 키워드 → 출처 (링크 없이 복붙만 할 때 대비)
+_COMMUNITY_TEXT_HINTS = {
+    "리멤버": "리멤버 커뮤니티", "블라인드": "블라인드", "네이버 카페": "네이버 카페",
+    "에펨": "에펨코리아", "펨코": "에펨코리아", "디시": "디시인사이드", "클리앙": "클리앙",
+    "뽐뿌": "뽐뿌", "루리웹": "루리웹", "보배드림": "보배드림", "더쿠": "더쿠",
 }
 
 
-def _community_source_name(link: str) -> str:
+def _community_source_name(link: str, text: str = "") -> str:
     low = (link or "").lower()
     for key, name in _COMMUNITY_SITES.items():
         if key in low:
+            return name
+    blob = text or ""
+    for key, name in _COMMUNITY_TEXT_HINTS.items():
+        if key in blob:
             return name
     return "커뮤니티"
 
@@ -381,8 +394,8 @@ def handle_community(tg: TelegramClient, chat_id: int, content: str):
                         "커뮤니티 https://...\n(본문 붙여넣기)\n---댓글---\n(댓글 붙여넣기)")
         return
 
-    PENDING_COMMUNITY[chat_id] = {"post": post, "comments": comments,
-                                  "link": link, "source": _community_source_name(link)}
+    PENDING_COMMUNITY[chat_id] = {"post": post, "comments": comments, "link": link,
+                                  "source": _community_source_name(link, content)}
     extra = ("" if comments else
              "\n(댓글 반응 장도 넣으려면, 다시 보낼 때 본문 아래에 '---댓글---' 로 구분해 붙여넣어 주세요)")
     tg.send_message(chat_id,
