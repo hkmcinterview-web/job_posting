@@ -199,7 +199,10 @@ def _build_community_prompt(post: str, comments: str, n_options: int) -> str:
         "- 댓글들에서 드러나는 '사람들의 반응'을 2~4문장으로 정리 "
         "(공감이 몰린 의견, 갈리는 지점, 인상적/재치있는 반응 등)\n"
         "- 특정 댓글을 지어내지 말고 실제 댓글 흐름에 근거해서. 가장 인상적인 한 곳만 {{강조}}\n"
-        + ("- 댓글이 주어지지 않았으면 COMMENTS 는 빈 칸으로 두세요\n" if not has_comments else "")
+        + ("- ⚠️ 별도 [댓글들]이 없어도, 아래 [커뮤니티 본문]에 댓글/답글/반응이 함께 "
+           "붙어있는 경우가 많습니다. 본문 뒷부분의 짧은 여러 반응들을 댓글로 보고 COMMENTS 를 "
+           "꼭 채워주세요. 정말 반응이 하나도 없이 글만 있을 때만 COMMENTS 를 비우세요\n"
+           if not has_comments else "")
         + "\n캡션(CAPTION, 인스타 게시글 본문용) 규칙:\n"
         "- 1~2문장 요약 + 취준생 관점 한마디, 마지막 줄에 해시태그 6~8개\n\n"
         "헤드라인/공통 규칙:\n"
@@ -218,7 +221,7 @@ def _build_community_prompt(post: str, comments: str, n_options: int) -> str:
         "HEADLINE:\n헤드라인 첫 줄\n헤드라인 둘째 줄\n<<<END>>>\n"
         f"(CARD 블록을 총 {n_options}번 반복)\n\n"
         f"[커뮤니티 본문]\n{post}\n\n"
-        f"[댓글들]\n{comments if has_comments else '(댓글 없음)'}"
+        f"[댓글들]\n{comments if has_comments else '(별도로 주어지지 않음 — 위 본문 안에서 반응/댓글을 찾아 요약하세요)'}"
     )
 
 

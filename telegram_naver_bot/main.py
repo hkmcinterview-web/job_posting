@@ -331,7 +331,7 @@ _COMMENT_SEP_RE = re.compile(r"^\s*-{0,3}\s*(베스트\s*댓글|댓글들|댓글
 _COMMUNITY_SITES = {
     "teamblind": "블라인드", "blind": "블라인드",
     "cafe.naver": "네이버 카페",
-    "rememberapp": "리멤버 커뮤니티", "remember": "리멤버 커뮤니티",
+    "rememberapp": "리멤버 커뮤니티", "remember": "리멤버 커뮤니티", "rmbr": "리멤버 커뮤니티",
     "fmkorea": "에펨코리아", "dcinside": "디시인사이드", "clien": "클리앙",
     "ppomppu": "뽐뿌", "ruliweb": "루리웹", "instiz": "인스티즈",
     "theqoo": "더쿠", "82cook": "82쿡", "bobaedream": "보배드림", "arca.live": "아카라이브",
