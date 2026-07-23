@@ -172,12 +172,16 @@ def _extract_extras(text: str) -> dict:
 
 
 def _extract_community_extras(text: str) -> dict:
-    """커뮤니티 카드 재료: summary(본문 요약) / comments(댓글 반응 요약) / caption."""
+    """커뮤니티 카드 재료: summary(본문) / comments(댓글반응) / takeaway(취준생 포인트) / caption."""
     comments = " ".join(ln.strip() for ln in _extract_block(text, "COMMENTS").split("\n")
                         if ln.strip())
+    takeaway = [ln.lstrip("-•· ").strip()
+                for ln in _extract_block(text, "TAKEAWAY").split("\n")
+                if ln.strip().lstrip("-•· ").strip()]
     return {
         "summary": _extract_summary(text),
         "comments": comments,
+        "takeaway": takeaway[:3],
         "caption": _extract_block(text, "CAPTION"),
     }
 
@@ -203,7 +207,10 @@ def _build_community_prompt(post: str, comments: str, n_options: int) -> str:
            "붙어있는 경우가 많습니다. 본문 뒷부분의 짧은 여러 반응들을 댓글로 보고 COMMENTS 를 "
            "꼭 채워주세요. 정말 반응이 하나도 없이 글만 있을 때만 COMMENTS 를 비우세요\n"
            if not has_comments else "")
-        + "\n캡션(CAPTION, 인스타 게시글 본문용) 규칙:\n"
+        + "\n취준생 관점 포인트(TAKEAWAY, 4장 슬라이드용) 규칙:\n"
+        "- 이 글/반응에서 공대생·이공계 취준생이 챙기면 좋은 점 2~3개, 각 줄 '- ' 로 시작 (각 18~45자)\n"
+        "- 공감·현실조언·시사점 위주. 가장 중요한 한 곳만 {{강조}}\n\n"
+        "캡션(CAPTION, 인스타 게시글 본문용) 규칙:\n"
         "- 1~2문장 요약 + 취준생 관점 한마디, 마지막 줄에 해시태그 6~8개\n\n"
         "헤드라인/공통 규칙:\n"
         "- ⚠️⚠️ 모든 출력은 반드시 '한국어'로만. 영어 고유명사/약어는 OK지만 "
@@ -216,6 +223,7 @@ def _build_community_prompt(post: str, comments: str, n_options: int) -> str:
         "출력 형식 — 아래를 정확히 지켜서 다른 설명 없이 작성:\n"
         "<<<SUMMARY>>>\n(본문 요약, 한 문장에 한 줄)\n<<<END>>>\n\n"
         "<<<COMMENTS>>>\n(댓글 반응 요약)\n<<<END>>>\n\n"
+        "<<<TAKEAWAY>>>\n- (취준생 포인트1)\n- (취준생 포인트2)\n<<<END>>>\n\n"
         "<<<CAPTION>>>\n(캡션 본문)\n#해시태그 #들\n<<<END>>>\n\n"
         "<<<CARD>>>\nTAG: (태그)\nHIGHLIGHT: (강조할 한 줄)\nSTYLE: marker 또는 color\n"
         "HEADLINE:\n헤드라인 첫 줄\n헤드라인 둘째 줄\n<<<END>>>\n"

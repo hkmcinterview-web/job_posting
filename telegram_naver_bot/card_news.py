@@ -571,6 +571,9 @@ def render_community_carousel(card: dict, background: Image.Image, extras: dict,
     if (extras.get("comments") or "").strip():
         slides.append(_slide_context(background, extras["comments"], len(slides) + 1, source,
                                      label="댓글 반응", title="사람들 반응은?"))
+    if extras.get("takeaway"):
+        slides.append(_slide_bullets(background, extras["takeaway"], len(slides) + 1, source,
+                                     "취준생 포인트", "챙겨두면 좋은 점"))
 
     paths = []
     for i, img in enumerate(slides, 1):
