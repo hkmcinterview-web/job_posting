@@ -75,7 +75,8 @@ from message_parser import URL_RE, detect_mode, extract_links, split_title_body
 from trends import (discover_hot_news, fetch_google_news_top, fetch_google_trends,
                     fetch_naver_news_ranking, fetch_newsapi_top, search_naver_news)
 from naver_cafe import post_article
-from summarize import build_card_options, compare_card_options, compare_community_options
+from summarize import (build_card_options, compare_card_options,
+                       compare_community_options, ocr_comments)
 from telegram_client import TelegramClient
 
 HELP_TEXT = (
@@ -90,8 +91,9 @@ HELP_TEXT = (
     "  https://n.news...\n\n"
     "🖼 카드뉴스 만들기:\n"
     "  첫 줄에 '카드' 라고 쓰고, 링크 1~3개를 넣으세요.\n"
-    "  여러 무료 모델(Gemini+OpenRouter)이 각각 헤드라인 후보를 만들어 보여드리면\n"
+    "  여러 무료 모델이 각각 헤드라인 후보를 만들어 보여드리면\n"
     "  'N-M' 형식으로 골라주세요 (N=모델 번호, M=헤드라인 번호). 예) 1-2\n"
+    "  마음에 안 들면 '재시도' 라고 보내면 소제목을 다시 뽑아드려요.\n"
     "  → 고른 모델의 내용으로 카드뉴스를 완성합니다.\n"
     "  예)\n"
     "  카드\n"
@@ -100,10 +102,11 @@ HELP_TEXT = (
     "  '비교' + 뉴스 링크 1개 — 모델별 헤드라인만 나란히 보여줍니다.\n"
     "  예) 비교 https://n.news...\n\n"
     "💬 커뮤니티 글로 카드뉴스 (본문 요약 + 댓글 반응 요약):\n"
-    "  '커뮤니티' + 링크 또는 본문/댓글을 붙여넣으세요. (댓글은 '---댓글---' 아래에)\n"
-    "  그다음 카드 배경으로 쓸 대표 이미지를 사진으로 보내면 만들어집니다.\n"
-    "  2장=본문 요약, 3장=댓글 반응 요약 으로 구성돼요.\n"
-    "  예)\n  커뮤니티\n  (본문 붙여넣기)\n  ---댓글---\n  (댓글 붙여넣기)\n  → (대표 이미지 전송)\n\n"
+    "  '커뮤니티' + 링크 또는 본문을 붙여넣으세요.\n"
+    "  댓글은 ① 본문 아래 '---댓글---' 로 붙여넣거나 ② 댓글 화면을 캡처해\n"
+    "  '댓글' 캡션 사진으로 보내면 봇이 읽어드려요(안되면 다른 모델로 재시도).\n"
+    "  그다음 카드 배경 이미지를 (캡션 없이) 사진으로 보내면 만들어집니다.\n"
+    "  4장 구성: 헤드라인 · 본문요약 · 댓글반응 · 취준생 포인트.\n\n"
     "💼 채용공고 카드 + 카페 게시:\n"
     "  ▸ 가장 추천: 공고 내용을 복사(Ctrl+A, Ctrl+C)해서 '채용' 뒤에 붙여넣고,\n"
     "    마지막 줄에 지원 링크도 함께 넣으세요 — 본문으로 카드를 만들고,\n"
@@ -397,10 +400,12 @@ def handle_community(tg: TelegramClient, chat_id: int, content: str):
     PENDING_COMMUNITY[chat_id] = {"post": post, "comments": comments, "link": link,
                                   "source": _community_source_name(link, content)}
     extra = ("" if comments else
-             "\n(댓글 반응 장도 넣으려면, 다시 보낼 때 본문 아래에 '---댓글---' 로 구분해 붙여넣어 주세요)")
+             "\n💡 댓글도 넣고 싶으면 둘 중 하나:\n"
+             "  ① 베스트 댓글 몇 개를 본문 아래 '---댓글---' 로 구분해 붙여넣기\n"
+             "  ② 댓글 화면을 캡처해서 '댓글' 캡션과 함께 사진으로 보내기 (봇이 읽어드려요)")
     tg.send_message(chat_id,
                     "✅ 커뮤니티 글 확인했어요. 이제 카드 배경으로 쓸 대표 이미지를 "
-                    "사진으로 보내주세요." + extra)
+                    "(캡션 없이) 사진으로 보내주세요." + extra)
 
 
 def _finalize_community_with_photos(tg: TelegramClient, chat_id: int, file_ids: list):
@@ -432,8 +437,39 @@ def _finalize_community_with_photos(tg: TelegramClient, chat_id: int, file_ids: 
         "queue": [], "link_idx": 1, "made": 0, "stamp": int(time.time()),
         "article": art, "choices": good, "extras": None,
         "kind": "community", "bg_image": bg, "source": state["source"],
+        "post": state["post"], "comments": state["comments"],   # 재시도용
     }
     tg.send_message(chat_id, _format_model_choices(good, results))
+
+
+def _add_community_comment_shot(tg: TelegramClient, chat_id: int, file_ids: list):
+    """'댓글' 캡션이 달린 스크린샷 — 비전(OCR)으로 댓글을 읽어 대기 중인 커뮤니티 글에 붙인다."""
+    state = PENDING_COMMUNITY.get(chat_id)
+    if not state:
+        tg.send_message(chat_id, "ℹ️ 먼저 '커뮤니티' + 본문을 보낸 뒤에 댓글 스크린샷을 보내주세요.")
+        return
+    images, _paths = _download_photos(tg, file_ids, int(time.time()))
+    if not images:
+        tg.send_message(chat_id, "⚠️ 댓글 스크린샷을 못 받았어요. 다시 보내주세요.")
+        return
+    tg.send_message(chat_id, f"⏳ 댓글 스크린샷 {len(images)}장을 읽는 중...")
+    parts = []
+    for mime, b64 in images:
+        try:
+            parts.append(ocr_comments(mime, b64))
+        except Exception as e:
+            tg.send_message(chat_id, f"⚠️ 댓글 읽기 실패: {e}")
+            return
+    ocr = "\n".join(p for p in parts if p.strip()).strip()
+    if not ocr:
+        tg.send_message(chat_id, "⚠️ 스크린샷에서 댓글을 못 읽었어요. 화면을 더 또렷하게 다시 찍거나, "
+                                 "텍스트로 붙여넣어 주세요.")
+        return
+    state["comments"] = ((state.get("comments") or "") + "\n" + ocr).strip()
+    tg.send_message(chat_id,
+                    f"✅ 댓글 스크린샷 반영했어요 (약 {len(ocr)}자).\n"
+                    "이제 카드 배경으로 쓸 대표 이미지를 (캡션 없이) 사진으로 보내주세요.\n"
+                    "(댓글을 더 넣으려면 '댓글' 캡션 스크린샷을 또 보내도 돼요)")
 
 
 _TREND_REGION_MAP = {
@@ -1082,6 +1118,39 @@ def _resolve_selection_work(tg, chat_id: int, text: str):
     _finish_link(tg, chat_id, chosen, state["article"], state)
 
 
+RETRY_WORDS = {"재시도", "다시", "다시해", "다시해줘", "다시만들기", "리롤", "한번더", "retry", "reroll"}
+
+
+def _is_retry(text: str) -> bool:
+    return text.strip().lower() in RETRY_WORDS
+
+
+def _retry_headlines(tg, chat_id: int, _text=None):
+    """헤드라인 후보가 마음에 안 들 때 — 같은 기사/글로 소제목만 다시 뽑아 보여준다."""
+    state = PENDING_CARD.get(chat_id)
+    if not state or not state.get("choices"):
+        return
+    tg.send_message(chat_id, "🔄 소제목을 다시 만들어볼게요...")
+    try:
+        if state.get("kind") == "community":
+            results = compare_community_options(state.get("post", ""),
+                                                state.get("comments", ""), N_OPTIONS)
+        else:
+            results = compare_card_options(state["article"], N_OPTIONS)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 다시 만들기 실패: {e}\n위 후보 중에서 골라주시거나 다시 '재시도' 해주세요.")
+        return
+    good = [r for r in results if r.get("options")]
+    if not good:
+        reason = results[0]["error"] if results else "사용 가능한 모델 없음"
+        tg.send_message(chat_id, f"⚠️ 새 후보를 못 만들었어요: {reason}\n"
+                                 "위 후보 중에서 골라주시거나 다시 '재시도' 해주세요.")
+        return
+    state["choices"] = good
+    prefix = "" if state.get("kind") == "community" else f"[링크 {state['link_idx']}]\n"
+    tg.send_message(chat_id, prefix + _format_model_choices(good, results))
+
+
 # ── 메인 루프 ────────────────────────────────────────────
 
 def handle_message(tg: TelegramClient, chat_id: int, text: str):
@@ -1289,14 +1358,16 @@ def main():
                                              "멈추려면 '취소' 라고 보내주세요.")
                     continue
 
-                # 카드 후보 선택 대기 중 — 'N-M'(또는 숫자) 답장이면 그 카드로 진행(워커에서)
+                # 카드 후보 선택 대기 중 — 'N-M' 선택 / '재시도' 재생성 / 그 외엔 취소+새요청
                 if chat_id in PENDING_CARD and PENDING_CARD[chat_id].get("choices"):
-                    if re.match(r"\s*\d", text):
+                    if _is_retry(text):
+                        _start_work(tg, chat_id, _retry_headlines)
+                    elif re.match(r"\s*\d", text):
                         _start_work(tg, chat_id, _resolve_selection_work, text)
                     else:
                         PENDING_CARD.pop(chat_id, None)
                         tg.send_message(chat_id, "⚠️ 진행 중이던 선택은 취소하고 새 요청을 처리할게요. "
-                                                 "(후보를 고르려면 'N-M' 으로 답장해주세요)")
+                                                 "(후보를 고르려면 'N-M', 다시 뽑으려면 '재시도')")
                         _start_work(tg, chat_id, handle_message, text)
                     continue
 
@@ -1322,8 +1393,12 @@ def main():
             elif mode == "job":
                 _start_work(tg, cid, handle_job_photos, rest, g["file_ids"])
             elif cid in PENDING_COMMUNITY:
-                # 커뮤니티 글의 대표 이미지 — 받으면 바로 카드 생성으로 진행
-                _start_work(tg, cid, _finalize_community_with_photos, g["file_ids"])
+                if "댓글" in (g["caption"] or ""):
+                    # '댓글' 캡션 스크린샷 — 비전 OCR 로 댓글 읽어서 반영 (배경 아님)
+                    _start_work(tg, cid, _add_community_comment_shot, g["file_ids"])
+                else:
+                    # 캡션 없는 사진 = 카드 배경 이미지 → 바로 카드 생성으로 진행
+                    _start_work(tg, cid, _finalize_community_with_photos, g["file_ids"])
             elif cid in PENDING_JOB:
                 # 방금 보낸 채용공고 텍스트를 이어서 보충하는 사진 (캡션 없이 보내도 됨)
                 _start_work(tg, cid, _append_pending_job_photos, g["file_ids"])

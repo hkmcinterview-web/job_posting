@@ -411,16 +411,24 @@ def _build_cards_gemini(prompt: str):
 # ── OpenRouter (무료 오픈모델 — '비교' 전용) ──────────────────
 
 def _openai_chat(url: str, api_key: str, model: str, prompt: str,
-                 temperature: float, extra_headers: dict = None) -> str:
-    """OpenAI 호환 chat/completions 엔드포인트(OpenRouter·Groq 공용) 호출."""
+                 temperature: float, extra_headers: dict = None, images=None) -> str:
+    """OpenAI 호환 chat/completions 엔드포인트(OpenRouter·Groq 공용) 호출.
+    images: [(mime, base64), ...] 가 있으면 비전(멀티모달) 형식으로 보낸다."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if extra_headers:
         headers.update(extra_headers)
+    if images:
+        content = [{"type": "text", "text": prompt}]
+        for mime, b64 in images:
+            content.append({"type": "image_url",
+                            "image_url": {"url": f"data:{mime};base64,{b64}"}})
+    else:
+        content = prompt
     resp = requests.post(
         url,
         headers=headers,
         json={"model": model,
-              "messages": [{"role": "user", "content": prompt}],
+              "messages": [{"role": "user", "content": content}],
               "temperature": temperature},
         timeout=60,
     )
@@ -432,22 +440,66 @@ def _openai_chat(url: str, api_key: str, model: str, prompt: str,
     return choices[0].get("message", {}).get("content", "") or ""
 
 
-def _openrouter_generate(prompt: str, model: str, temperature: float = 0.9) -> str:
+def _openrouter_generate(prompt: str, model: str, temperature: float = 0.9, images=None) -> str:
     """OpenRouter 로 무료 오픈모델(Qwen·Llama·DeepSeek 등)에 프롬프트를 보낸다.
     model 은 ':free' 로 끝나는 무료 모델 ID 여야 과금 위험이 없다."""
     if not config.OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY 가 설정되지 않음")
     return _openai_chat("https://openrouter.ai/api/v1/chat/completions",
                         config.OPENROUTER_API_KEY, model, prompt, temperature,
-                        {"X-Title": "jobnyou-cardnews-bot"})
+                        {"X-Title": "jobnyou-cardnews-bot"}, images=images)
 
 
-def _groq_generate(prompt: str, model: str, temperature: float = 0.9) -> str:
+def _groq_generate(prompt: str, model: str, temperature: float = 0.9, images=None) -> str:
     """Groq 로 무료 오픈모델(Llama·Gemma 등)에 프롬프트를 보낸다. 무료 한도가 넉넉하고 빠름."""
     if not config.GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY 가 설정되지 않음")
     return _openai_chat("https://api.groq.com/openai/v1/chat/completions",
-                        config.GROQ_API_KEY, model, prompt, temperature)
+                        config.GROQ_API_KEY, model, prompt, temperature, images=images)
+
+
+_OCR_COMMENTS_PROMPT = (
+    "이 이미지는 온라인 커뮤니티 글의 '댓글' 화면 캡처입니다.\n"
+    "보이는 댓글들의 '내용'만 한 줄에 하나씩 그대로 한국어로 옮겨 적어주세요.\n"
+    "작성자 닉네임·시간·추천수·버튼 등은 빼고 댓글 문장만. 다른 설명/머리말은 넣지 마세요."
+)
+
+
+def ocr_comments(mime: str, b64: str) -> str:
+    """댓글 스크린샷에서 댓글 텍스트를 뽑는다. Gemini → Groq → OpenRouter 비전 모델 순 폴백."""
+    imgs = [(mime, b64)]
+    last_err = None
+
+    if config.GEMINI_API_KEY:
+        try:
+            out = _gemini_generate(_OCR_COMMENTS_PROMPT, temperature=0.0, images=imgs)
+            if out.strip():
+                return out
+        except Exception as e:
+            last_err = f"Gemini: {e}"
+            print(f"[summarize] 댓글 OCR Gemini 실패, 다음 모델로: {e}")
+
+    if config.GROQ_API_KEY and config.GROQ_VISION_MODEL:
+        try:
+            out = _groq_generate(_OCR_COMMENTS_PROMPT, config.GROQ_VISION_MODEL,
+                                 temperature=0.0, images=imgs)
+            if out.strip():
+                return out
+        except Exception as e:
+            last_err = f"Groq: {e}"
+            print(f"[summarize] 댓글 OCR Groq 실패, 다음 모델로: {e}")
+
+    if config.OPENROUTER_API_KEY and config.OPENROUTER_VISION_MODEL:
+        try:
+            out = _openrouter_generate(_OCR_COMMENTS_PROMPT, config.OPENROUTER_VISION_MODEL,
+                                       temperature=0.0, images=imgs)
+            if out.strip():
+                return out
+        except Exception as e:
+            last_err = f"OpenRouter: {e}"
+            print(f"[summarize] 댓글 OCR OpenRouter 실패: {e}")
+
+    raise RuntimeError(last_err or "비전(OCR) 가능한 모델이 없어요 (GEMINI/GROQ_VISION/OPENROUTER_VISION 키 확인)")
 
 
 def _openrouter_label(model: str) -> str:

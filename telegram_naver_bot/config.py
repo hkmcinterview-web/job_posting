@@ -89,6 +89,9 @@ GROQ_MODELS = [m.strip() for m in os.getenv(
     "GROQ_MODELS",
     "llama-3.3-70b-versatile,gemma2-9b-it"
 ).split(",") if m.strip()]
+# 댓글 스크린샷 OCR 용 비전(멀티모달) 모델 — Gemini 가 막혔을 때 폴백.
+GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+OPENROUTER_VISION_MODEL = os.getenv("OPENROUTER_VISION_MODEL", "")
 
 # ── 게시글/카드 설정 ─────────────────────────────────────
 BRAND_NAME = os.getenv("BRAND_NAME", "공대생현직자 잡앤유")
