@@ -501,9 +501,10 @@ def _slide_bullets(background, items: list, page: int, source: str,
     return img.convert("RGB")
 
 
-def _slide_context(background, context: str, page: int, source: str) -> Image.Image:
-    """3장 — 배경/맥락을 이야기하듯 흐르는 문단으로. 좌측 노란 바 + 큰따옴표."""
-    img, draw, y = _slide_frame(background, page, "배경 짚기", "왜 이런 일이?", source)
+def _slide_context(background, context: str, page: int, source: str,
+                   label: str = "배경 짚기", title: str = "왜 이런 일이?") -> Image.Image:
+    """3장 — 이야기하듯 흐르는 문단으로. 좌측 노란 바 + 큰따옴표. (배경/댓글반응 공용)"""
+    img, draw, y = _slide_frame(background, page, label, title, source)
     text = (context or "").strip()
     plain, _ = _extract_highlight_spans(text)
 
@@ -548,6 +549,28 @@ def render_carousel(card: dict, article: dict, extras: dict, out_prefix: str) ->
     if extras.get("outlook"):
         slides.append(_slide_bullets(background, extras["outlook"], len(slides) + 1,
                                      source, "전망", "앞으로 지켜볼 포인트"))
+
+    paths = []
+    for i, img in enumerate(slides, 1):
+        path = config.CARDS_DIR / f"{out_prefix}_{i}.png"
+        img.save(path, "PNG")
+        paths.append(path)
+    return paths
+
+
+def render_community_carousel(card: dict, background: Image.Image, extras: dict,
+                              source: str, out_prefix: str) -> list:
+    """커뮤니티 글 캐러셀 — 사용자가 준 이미지를 배경으로.
+    1장 헤드라인 · 2장 본문 요약 · 3장 댓글 반응 요약."""
+    config.CARDS_DIR.mkdir(parents=True, exist_ok=True)
+    extras = extras or {}
+    slides = [_draw_card(card, background, source, 0, 1)]
+
+    if (extras.get("summary") or "").strip():
+        slides.append(_slide_summary(background, extras["summary"], len(slides) + 1, source))
+    if (extras.get("comments") or "").strip():
+        slides.append(_slide_context(background, extras["comments"], len(slides) + 1, source,
+                                     label="댓글 반응", title="사람들 반응은?"))
 
     paths = []
     for i, img in enumerate(slides, 1):

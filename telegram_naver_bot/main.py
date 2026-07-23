@@ -66,7 +66,7 @@ sys.stdout = _Tee(sys.stdout, config.BASE_DIR / "bot.log")
 sys.stderr = _Tee(sys.stderr, config.BASE_DIR / "bot.log")
 
 from article import fetch_article, fetch_job_page
-from card_news import render_carousel, render_cards
+from card_news import render_carousel, render_cards, render_community_carousel
 from editor import build_cafe_post, build_job_post
 from job_card import render_job_card
 from job_summary import build_job_data
@@ -75,7 +75,7 @@ from message_parser import URL_RE, detect_mode, extract_links, split_title_body
 from trends import (discover_hot_news, fetch_google_news_top, fetch_google_trends,
                     fetch_naver_news_ranking, fetch_newsapi_top, search_naver_news)
 from naver_cafe import post_article
-from summarize import build_card_options, compare_card_options
+from summarize import build_card_options, compare_card_options, compare_community_options
 from telegram_client import TelegramClient
 
 HELP_TEXT = (
@@ -99,6 +99,11 @@ HELP_TEXT = (
     "🔬 모델 비교만 보기 (카드 안 만들고 헤드라인만 비교):\n"
     "  '비교' + 뉴스 링크 1개 — 모델별 헤드라인만 나란히 보여줍니다.\n"
     "  예) 비교 https://n.news...\n\n"
+    "💬 커뮤니티 글로 카드뉴스 (본문 요약 + 댓글 반응 요약):\n"
+    "  '커뮤니티' + 링크 또는 본문/댓글을 붙여넣으세요. (댓글은 '---댓글---' 아래에)\n"
+    "  그다음 카드 배경으로 쓸 대표 이미지를 사진으로 보내면 만들어집니다.\n"
+    "  2장=본문 요약, 3장=댓글 반응 요약 으로 구성돼요.\n"
+    "  예)\n  커뮤니티\n  (본문 붙여넣기)\n  ---댓글---\n  (댓글 붙여넣기)\n  → (대표 이미지 전송)\n\n"
     "💼 채용공고 카드 + 카페 게시:\n"
     "  ▸ 가장 추천: 공고 내용을 복사(Ctrl+A, Ctrl+C)해서 '채용' 뒤에 붙여넣고,\n"
     "    마지막 줄에 지원 링크도 함께 넣으세요 — 본문으로 카드를 만들고,\n"
@@ -154,6 +159,10 @@ PENDING_CARD: dict = {}
 #            "created": float, "timer": threading.Timer|None, "extensions": int}}
 PENDING_JOB: dict = {}
 _pending_job_lock = threading.Lock()
+
+# 커뮤니티 글: 본문/댓글을 받아두고 "대표 이미지를 보내주세요" 하며 사진을 기다리는 상태.
+# {chat_id: {"post", "comments", "link", "source"}}
+PENDING_COMMUNITY: dict = {}
 
 JOB_WAIT_SECONDS = 15     # 텍스트만 온 뒤 이미지를 기다리는 시간(초)
 JOB_WAIT_EXTEND = 10      # 이미지가 오면 추가로 더 기다려주는 시간(초)
@@ -312,6 +321,106 @@ def handle_compare(tg: TelegramClient, chat_id: int, content: str):
                 lines.append(f"  {i}. {hl}")
     lines.append("\n괜찮은 모델을 정하면 알려주세요 — 그 모델을 카드뉴스 기본으로 바꿔드릴게요.")
     tg.send_message(chat_id, "\n".join(lines))
+
+
+# ── 커뮤니티 글 카드뉴스 (본문 요약 + 댓글 반응 요약, 사용자 제공 이미지) ──
+
+_COMMENT_SEP_RE = re.compile(r"^\s*-{0,3}\s*(베스트\s*댓글|댓글들|댓글|comments?)\s*-{0,3}\s*$",
+                             re.IGNORECASE | re.MULTILINE)
+_COMMUNITY_SITES = {
+    "teamblind": "블라인드", "blind": "블라인드",
+    "cafe.naver": "네이버 카페", "rememberapp": "리멤버", "remember": "리멤버",
+    "fmkorea": "에펨코리아", "dcinside": "디시인사이드", "clien": "클리앙",
+    "ppomppu": "뽐뿌", "ruliweb": "루리웹",
+}
+
+
+def _community_source_name(link: str) -> str:
+    low = (link or "").lower()
+    for key, name in _COMMUNITY_SITES.items():
+        if key in low:
+            return name
+    return "커뮤니티"
+
+
+def _split_post_comments(text: str):
+    """붙여넣은 글에서 '댓글'(또는 --- 댓글 ---) 구분선을 찾아 본문/댓글로 나눈다."""
+    m = _COMMENT_SEP_RE.search(text or "")
+    if m:
+        return text[:m.start()].strip(), text[m.end():].strip()
+    return (text or "").strip(), ""
+
+
+def handle_community(tg: TelegramClient, chat_id: int, content: str):
+    """'커뮤니티' + (링크/본문/댓글) → 본문·댓글을 받아두고 대표 이미지를 기다린다."""
+    links = extract_links(content)
+    link = links[0] if links else ""
+    text = URL_RE.sub("", content).strip()
+    post, comments = _split_post_comments(text)
+
+    # 붙여넣은 본문이 거의 없고 링크만 있으면 자동 추출 시도(블라인드·카페·리멤버는 대개 실패)
+    if len(text) < 60 and link:
+        tg.send_message(chat_id, "⏳ 커뮤니티 링크에서 본문을 읽어보는 중...")
+        try:
+            art = fetch_article(link)
+            fetched = "\n".join(art.get("paragraphs", []))
+        except Exception:
+            fetched = ""
+        if len(fetched) >= 200:
+            post, comments = fetched, ""
+        else:
+            tg.send_message(chat_id,
+                            "⚠️ 이 커뮤니티는 링크로 본문을 못 읽었어요 (로그인/앱 전용일 수 있어요).\n"
+                            "'커뮤니티' 뒤에 본문을 복사해 붙여넣고, 댓글은 그 아래에 '---댓글---' 로 "
+                            "구분해서 함께 붙여넣어 주세요.")
+            return
+
+    if len((post or "").strip()) < 20:
+        tg.send_message(chat_id,
+                        "⚠️ '커뮤니티' 뒤에 글 본문(과 댓글)을 넣어주세요.\n예)\n"
+                        "커뮤니티 https://...\n(본문 붙여넣기)\n---댓글---\n(댓글 붙여넣기)")
+        return
+
+    PENDING_COMMUNITY[chat_id] = {"post": post, "comments": comments,
+                                  "link": link, "source": _community_source_name(link)}
+    extra = ("" if comments else
+             "\n(댓글 반응 장도 넣으려면, 다시 보낼 때 본문 아래에 '---댓글---' 로 구분해 붙여넣어 주세요)")
+    tg.send_message(chat_id,
+                    "✅ 커뮤니티 글 확인했어요. 이제 카드 배경으로 쓸 대표 이미지를 "
+                    "사진으로 보내주세요." + extra)
+
+
+def _finalize_community_with_photos(tg: TelegramClient, chat_id: int, file_ids: list):
+    """대표 이미지를 받으면 본문/댓글 요약 + 헤드라인 후보를 만들어 N-M 선택으로 넘긴다."""
+    state = PENDING_COMMUNITY.pop(chat_id, None)
+    if not state:
+        return
+    _images, photo_paths = _download_photos(tg, file_ids, int(time.time()))
+    if not photo_paths:
+        tg.send_message(chat_id, "⚠️ 이미지를 못 받았어요. 다시 '커뮤니티'부터 시도해주세요.")
+        return
+    from PIL import Image
+    try:
+        bg = Image.open(photo_paths[0]).convert("RGB")
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 이미지를 열지 못했어요: {e}")
+        return
+
+    tg.send_message(chat_id, "⏳ 여러 모델이 본문·댓글 요약과 헤드라인을 만드는 중...")
+    results = compare_community_options(state["post"], state["comments"], N_OPTIONS)
+    good = [r for r in results if r.get("options")]
+    if not good:
+        reason = results[0]["error"] if results else "사용 가능한 모델 없음"
+        tg.send_message(chat_id, f"⚠️ 카드 생성 실패: {reason}")
+        return
+
+    art = {"url": state["link"], "source": state["source"]}
+    PENDING_CARD[chat_id] = {
+        "queue": [], "link_idx": 1, "made": 0, "stamp": int(time.time()),
+        "article": art, "choices": good, "extras": None,
+        "kind": "community", "bg_image": bg, "source": state["source"],
+    }
+    tg.send_message(chat_id, _format_model_choices(good, results))
 
 
 _TREND_REGION_MAP = {
@@ -822,8 +931,13 @@ def _send_caption_text(tg: TelegramClient, chat_id: int, art: dict, extras: dict
 def _finish_link(tg: TelegramClient, chat_id: int, card: dict, art: dict, state: dict):
     """선택(또는 자동 확정)된 헤드라인으로 캐러셀(1~4장)을 렌더링해서 보내고 다음 링크로 진행."""
     try:
-        paths = render_carousel(card, art, state.get("extras") or {},
-                                f"{state['stamp']}_{state['link_idx']}")
+        if state.get("kind") == "community":
+            paths = render_community_carousel(card, state["bg_image"], state.get("extras") or {},
+                                              state.get("source", ""),
+                                              f"{state['stamp']}_{state['link_idx']}")
+        else:
+            paths = render_carousel(card, art, state.get("extras") or {},
+                                    f"{state['stamp']}_{state['link_idx']}")
         for i, p in enumerate(paths, 1):
             tg.send_photo(chat_id, p, caption=f"{i}/{len(paths)}장" if len(paths) > 1 else "")
         state["made"] += len(paths)
@@ -981,6 +1095,8 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_discover(tg, chat_id, content)
     elif mode == "compare":
         handle_compare(tg, chat_id, content)
+    elif mode == "community":
+        handle_community(tg, chat_id, content)
     elif mode == "logo":
         tg.send_message(chat_id,
                         "🖼 로고를 등록하려면, 로고 이미지(PNG 권장)를 '로고' 라는 캡션과 함께 "
@@ -1064,6 +1180,7 @@ def _cancel_current(tg, chat_id):
         WORK["cancel"].set()          # 워커에게 중단 신호
     WORK["thread"] = None             # 슬롯을 즉시 비워 새 작업을 바로 받을 수 있게
     PENDING_CARD.pop(chat_id, None)
+    PENDING_COMMUNITY.pop(chat_id, None)
     had_pending_job = _cancel_pending_job(chat_id) is not None
     if busy:
         tg.send_message(chat_id, "🛑 진행 중이던 작업을 멈췄어요. 새로 시작하셔도 됩니다.")
@@ -1191,6 +1308,9 @@ def main():
                 _save_chat_logo(tg, cid, g["file_ids"])
             elif mode == "job":
                 _start_work(tg, cid, handle_job_photos, rest, g["file_ids"])
+            elif cid in PENDING_COMMUNITY:
+                # 커뮤니티 글의 대표 이미지 — 받으면 바로 카드 생성으로 진행
+                _start_work(tg, cid, _finalize_community_with_photos, g["file_ids"])
             elif cid in PENDING_JOB:
                 # 방금 보낸 채용공고 텍스트를 이어서 보충하는 사진 (캡션 없이 보내도 됨)
                 _start_work(tg, cid, _append_pending_job_photos, g["file_ids"])

@@ -171,6 +171,57 @@ def _extract_extras(text: str) -> dict:
     }
 
 
+def _extract_community_extras(text: str) -> dict:
+    """커뮤니티 카드 재료: summary(본문 요약) / comments(댓글 반응 요약) / caption."""
+    comments = " ".join(ln.strip() for ln in _extract_block(text, "COMMENTS").split("\n")
+                        if ln.strip())
+    return {
+        "summary": _extract_summary(text),
+        "comments": comments,
+        "caption": _extract_block(text, "CAPTION"),
+    }
+
+
+def _build_community_prompt(post: str, comments: str, n_options: int) -> str:
+    """커뮤니티 글 카드뉴스용 프롬프트 — 본문 요약(2장) + 댓글 반응 요약(3장) + 헤드라인 후보."""
+    post = (post or "")[:5000]
+    comments = (comments or "")[:4000]
+    has_comments = bool(comments.strip())
+    return (
+        "다음은 온라인 커뮤니티 글의 '본문'과 그 아래 '댓글들'입니다.\n"
+        "이걸로 공대생/이공계 취준생 대상 인스타 카드뉴스(캐러셀)를 만듭니다.\n"
+        "뉴스가 아니라 '커뮤니티 화제글'이므로, 딱딱하지 않고 공감·재미 위주로.\n\n"
+        f"같은 카드에 쓸 서로 다른 톤의 헤드라인 후보를 정확히 {n_options}개 만들어 주세요.\n\n"
+        "본문 요약(SUMMARY, 2장 슬라이드용) 규칙:\n"
+        "- 이 글이 무슨 얘기인지 4~6문장으로 자연스럽게 (핵심 상황·맥락)\n"
+        "- 한 문장에 한 줄씩, 가장 핵심 1~2곳만 {{이렇게}} 감싸 강조\n\n"
+        "댓글 반응 요약(COMMENTS, 3장 슬라이드용) 규칙:\n"
+        "- 댓글들에서 드러나는 '사람들의 반응'을 2~4문장으로 정리 "
+        "(공감이 몰린 의견, 갈리는 지점, 인상적/재치있는 반응 등)\n"
+        "- 특정 댓글을 지어내지 말고 실제 댓글 흐름에 근거해서. 가장 인상적인 한 곳만 {{강조}}\n"
+        + ("- 댓글이 주어지지 않았으면 COMMENTS 는 빈 칸으로 두세요\n" if not has_comments else "")
+        + "\n캡션(CAPTION, 인스타 게시글 본문용) 규칙:\n"
+        "- 1~2문장 요약 + 취준생 관점 한마디, 마지막 줄에 해시태그 6~8개\n\n"
+        "헤드라인/공통 규칙:\n"
+        "- ⚠️⚠️ 모든 출력은 반드시 '한국어'로만. 영어 고유명사/약어는 OK지만 "
+        "중국어(汉字 문장)·일본어(かな)는 절대 금지.\n"
+        "- HEADLINE 아래에는 실제 문장만 한 줄씩. '(첫째 줄)' 같은 표시는 쓰지 말 것.\n"
+        "- HEADLINE 은 2~3줄, 각 줄 8~14자, 위트있게(커뮤니티 감성). 제목 그대로 베끼지 말 것.\n"
+        "- TAG: 2~4자 카테고리 (예: 이슈, 공감, 취업, 현직, 꿀팁, 논란)\n"
+        "- HIGHLIGHT: HEADLINE 중 강조할 한 줄을 그대로 복사\n"
+        "- STYLE: marker 또는 color 중 하나\n\n"
+        "출력 형식 — 아래를 정확히 지켜서 다른 설명 없이 작성:\n"
+        "<<<SUMMARY>>>\n(본문 요약, 한 문장에 한 줄)\n<<<END>>>\n\n"
+        "<<<COMMENTS>>>\n(댓글 반응 요약)\n<<<END>>>\n\n"
+        "<<<CAPTION>>>\n(캡션 본문)\n#해시태그 #들\n<<<END>>>\n\n"
+        "<<<CARD>>>\nTAG: (태그)\nHIGHLIGHT: (강조할 한 줄)\nSTYLE: marker 또는 color\n"
+        "HEADLINE:\n헤드라인 첫 줄\n헤드라인 둘째 줄\n<<<END>>>\n"
+        f"(CARD 블록을 총 {n_options}번 반복)\n\n"
+        f"[커뮤니티 본문]\n{post}\n\n"
+        f"[댓글들]\n{comments if has_comments else '(댓글 없음)'}"
+    )
+
+
 def _extract_cards(text: str) -> list:
     """모델 응답에서 <<<CARD>>>...<<<END>>> 블록들을 뽑아 헤드라인 후보 목록으로 변환.
 
@@ -442,13 +493,11 @@ def _resolve_openrouter_models() -> list:
         return []
 
 
-def compare_card_options(article: dict, n_options: int = 3) -> list:
-    """같은 카드 프롬프트를 Gemini + OpenRouter 무료 모델들에 '병렬'로 돌려 비교.
-    returns [{"provider","options","error"}]  (모델별 헤드라인 후보)"""
+def _compare_models(prompt: str, extras_fn, n_options: int = 3) -> list:
+    """주어진 프롬프트를 Gemini + Groq + OpenRouter 무료 모델들에 '병렬'로 돌려 비교.
+    extras_fn(text) 로 모델별 캐러셀 재료(요약 등)를 뽑는다.
+    returns [{"provider","options","extras","error"}]"""
     import concurrent.futures
-
-    n_options = max(2, min(3, n_options))
-    prompt = _build_prompt(article, n_options)
 
     groq_models = config.GROQ_MODELS if config.GROQ_API_KEY else []
     or_models = _resolve_openrouter_models() if config.OPENROUTER_API_KEY else []
@@ -470,7 +519,7 @@ def compare_card_options(article: dict, n_options: int = 3) -> list:
                 return {"provider": label, "options": [], "extras": {},
                         "error": "출력이 한국어를 벗어남(중국어/일본어)"}
             return {"provider": label, "options": _extract_cards(text),
-                    "extras": _extract_extras(text), "error": ""}
+                    "extras": extras_fn(text), "error": ""}
         except Exception as e:
             return {"provider": label, "options": [], "extras": {}, "error": str(e)}
 
@@ -487,6 +536,19 @@ def compare_card_options(article: dict, n_options: int = 3) -> list:
              + [_openrouter_label(m) for m in or_models])
     results.sort(key=lambda r: order.index(r["provider"]) if r["provider"] in order else 99)
     return results
+
+
+def compare_card_options(article: dict, n_options: int = 3) -> list:
+    """뉴스 기사 카드 — 여러 모델로 헤드라인 후보를 비교."""
+    n_options = max(2, min(3, n_options))
+    return _compare_models(_build_prompt(article, n_options), _extract_extras, n_options)
+
+
+def compare_community_options(post: str, comments: str, n_options: int = 3) -> list:
+    """커뮤니티 글 카드 — 본문 요약(2장) + 댓글 반응 요약(3장)을 여러 모델로 비교."""
+    n_options = max(2, min(3, n_options))
+    return _compare_models(_build_community_prompt(post, comments, n_options),
+                           _extract_community_extras, n_options)
 
 
 # ── ② Claude API (유료) ──────────────────────────────────

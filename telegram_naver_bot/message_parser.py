@@ -23,6 +23,7 @@ GLOBAL_ISSUE_WORDS = ("해외이슈", "글로벌이슈", "세계이슈", "전세
 HEADLINE_WORDS = ("헤드라인", "톱뉴스", "탑뉴스", "newsapi", "headline")
 DISCOVER_WORDS = ("발굴", "발굴뉴스", "추천뉴스", "관심뉴스")
 COMPARE_WORDS = ("비교", "비교하기", "compare")
+COMMUNITY_WORDS = ("커뮤니티", "커뮤", "community")
 LOGO_WORDS = ("로고", "logo")
 LOGO_CLEAR_WORDS = ("로고삭제", "로고제거", "로고초기화", "로고끄기")
 
@@ -31,7 +32,7 @@ def detect_mode(text: str):
     """returns (mode, rest_text). mode ∈
     {'cafe','card','job','expand','cancel','finish','news','trend',
      'domestic_issue','global_issue','headline','discover','compare',
-     'logo','logo_clear',None}"""
+     'community','logo','logo_clear',None}"""
     stripped = (text or "").lstrip()
     # 첫 토큰(공백/줄바꿈/콜론 전까지)
     head = re.split(r"[\s:：]", stripped, 1)[0].lower()
@@ -54,6 +55,8 @@ def detect_mode(text: str):
         return "discover", rest
     if head in COMPARE_WORDS:
         return "compare", rest
+    if head in COMMUNITY_WORDS:
+        return "community", rest
     if head in LOGO_CLEAR_WORDS:
         return "logo_clear", rest
     if head in LOGO_WORDS:
