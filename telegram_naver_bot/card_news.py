@@ -247,8 +247,10 @@ def _prepare_bg(img: Image.Image) -> Image.Image:
         return img.resize((W, H), Image.LANCZOS)
     target, ratio = W / H, iw / ih
     if abs(ratio - target) / target <= 0.06:      # 비율 거의 동일 → 꽉 채움
+        print(f"[card_news] 배경 {iw}x{ih} (비율 {ratio:.2f}) → cover(꽉 채움)")
         return ImageOps.fit(img, (W, H), Image.LANCZOS)
     # 비율이 다름 → 전체를 담고(contain) 나머지는 블러+살짝 어둡게 채움
+    print(f"[card_news] 배경 {iw}x{ih} (비율 {ratio:.2f}) → contain(전체 담기+블러)")
     base = ImageOps.fit(img, (W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(40))
     base = Image.blend(base, Image.new("RGB", (W, H), (0, 0, 0)), 0.35)
     fg = img.copy()
