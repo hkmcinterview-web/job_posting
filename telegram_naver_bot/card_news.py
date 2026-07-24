@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 import config
 from article import fetch_image_bytes
@@ -150,10 +150,8 @@ def _fetch_one_image(url: str, referer: str) -> Image.Image:
                 img = bigger
                 break
 
-    # 여기서 잘라 채우지 않고 원본 비율 그대로 반환한다.
-    # 실제 배경 배치(cover/contain)는 _prepare_bg 가 프레임 비율에 맞춰 처리해서,
-    # 로고 등 가장자리의 중요한 부분이 잘리지 않게 한다.
-    return img
+    cropped, _scale = _cover_crop(img)
+    return cropped
 
 
 def load_backgrounds(article: dict, count: int) -> list:
@@ -238,29 +236,6 @@ def _apply_graduated_blur_dark(img: Image.Image, ramp_top: int, ramp_bottom: int
     return img
 
 
-def _prepare_bg(img: Image.Image) -> Image.Image:
-    """배경을 프레임(W,H)에 맞춘다.
-    - 비율이 프레임과 비슷하면 꽉 채운다(cover, 잘림 미미).
-    - 많이 다르면 이미지 '전체'를 담고(contain) 남는 공간은 같은 이미지의 블러로 채워,
-      로고 등 가장자리의 중요한 부분이 잘리지 않게 한다."""
-    img = img.convert("RGB")
-    iw, ih = img.size
-    if iw == 0 or ih == 0:
-        return img.resize((W, H), Image.LANCZOS)
-    target, ratio = W / H, iw / ih
-    if abs(ratio - target) / target <= 0.06:      # 비율 거의 동일 → 꽉 채움
-        print(f"[card_news] 배경 {iw}x{ih} (비율 {ratio:.2f}) → cover(꽉 채움)")
-        return ImageOps.fit(img, (W, H), Image.LANCZOS)
-    # 비율이 다름 → 전체를 담고(contain) 나머지는 블러+살짝 어둡게 채움
-    print(f"[card_news] 배경 {iw}x{ih} (비율 {ratio:.2f}) → contain(전체 담기+블러)")
-    base = ImageOps.fit(img, (W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(40))
-    base = Image.blend(base, Image.new("RGB", (W, H), (0, 0, 0)), 0.35)
-    fg = img.copy()
-    fg.thumbnail((W, H), Image.LANCZOS)
-    base.paste(fg, ((W - fg.width) // 2, (H - fg.height) // 2))
-    return base
-
-
 def _draw_card(card, background: Image.Image, source: str,
                index: int, total: int) -> Image.Image:
     headline = card.get("headline") or card.get("title", "")
@@ -268,7 +243,9 @@ def _draw_card(card, background: Image.Image, source: str,
     highlight = card.get("highlight") or ""
     style = card.get("style") or "marker"
 
-    img = _prepare_bg(background) if background is not None else Image.new("RGB", (W, H), FALLBACK_BG)
+    img = background.copy() if background is not None else Image.new("RGB", (W, H), FALLBACK_BG)
+    if img.size != (W, H):
+        img = img.resize((W, H), Image.LANCZOS)
 
     headline_font = _font(True, 78)
     line_gap = 106
