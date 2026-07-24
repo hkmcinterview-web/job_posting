@@ -101,6 +101,10 @@ HELP_TEXT = (
     "🔬 모델 비교만 보기 (카드 안 만들고 헤드라인만 비교):\n"
     "  '비교' + 뉴스 링크 1개 — 모델별 헤드라인만 나란히 보여줍니다.\n"
     "  예) 비교 https://n.news...\n\n"
+    "🖼 뉴스 카드 + 내 이미지 (로고 등 직접 배치한 배경 쓰기):\n"
+    "  배경 이미지를 사진으로 보내면서 캡션에 '카드이미지 [기사 링크]' 를 적으세요.\n"
+    "  자동 사진 대신 그 이미지를 배경으로, 링크 내용으로 카드를 만듭니다.\n"
+    "  (배경은 1080×1350 4:5 권장) 예) 사진 캡션: 카드이미지 https://n.news...\n\n"
     "💬 커뮤니티 글로 카드뉴스 (본문 요약 + 댓글 반응 요약):\n"
     "  '커뮤니티' + 링크 또는 본문을 붙여넣으세요.\n"
     "  댓글은 ① 본문 아래 '---댓글---' 로 붙여넣거나 ② 댓글 화면을 캡처해\n"
@@ -470,6 +474,48 @@ def _add_community_comment_shot(tg: TelegramClient, chat_id: int, file_ids: list
                     f"✅ 댓글 스크린샷 반영했어요 (약 {len(ocr)}자).\n"
                     "이제 카드 배경으로 쓸 대표 이미지를 (캡션 없이) 사진으로 보내주세요.\n"
                     "(댓글을 더 넣으려면 '댓글' 캡션 스크린샷을 또 보내도 돼요)")
+
+
+def handle_card_with_image(tg: TelegramClient, chat_id: int, caption_rest: str, file_ids: list):
+    """뉴스 카드인데 배경은 사용자가 준 이미지로 — '카드이미지 [링크]' 캡션 + 사진.
+    링크에서 본문/헤드라인을 뽑고, 배경만 첨부한 이미지를 쓴다 (로고 등 직접 배치용)."""
+    links = extract_links(caption_rest)
+    if not links:
+        tg.send_message(chat_id, "⚠️ 사진 캡션에 '카드이미지' 와 함께 기사 링크를 넣어주세요.\n"
+                                 "예) 사진 캡션: 카드이미지 https://n.news...")
+        return
+    images, photo_paths = _download_photos(tg, file_ids, int(time.time()))
+    if not photo_paths:
+        tg.send_message(chat_id, "⚠️ 배경 이미지를 못 받았어요. 다시 보내주세요.")
+        return
+    from PIL import Image
+    try:
+        bg = Image.open(photo_paths[0]).convert("RGB")
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 이미지를 열지 못했어요: {e}")
+        return
+
+    url = links[0]
+    tg.send_message(chat_id, "⏳ 기사 내용을 읽고 여러 모델로 헤드라인을 만드는 중...")
+    try:
+        art = fetch_article(url)
+    except Exception as e:
+        tg.send_message(chat_id, f"⚠️ 기사 수집 실패: {e}\n(공고/기사 링크가 열리는지 확인해주세요)")
+        return
+
+    results = compare_card_options(art, N_OPTIONS)
+    good = [r for r in results if r.get("options")]
+    if not good:
+        reason = results[0]["error"] if results else "사용 가능한 모델 없음"
+        tg.send_message(chat_id, f"⚠️ 카드 생성 실패: {reason}")
+        return
+
+    PENDING_CARD[chat_id] = {
+        "queue": [], "link_idx": 1, "made": 0, "stamp": int(time.time()),
+        "article": art, "choices": good, "extras": None,
+        "kind": "news_img", "bg_image": bg,
+    }
+    tg.send_message(chat_id, _format_model_choices(good, results))
 
 
 _TREND_REGION_MAP = {
@@ -984,6 +1030,11 @@ def _finish_link(tg: TelegramClient, chat_id: int, card: dict, art: dict, state:
             paths = render_community_carousel(card, state["bg_image"], state.get("extras") or {},
                                               state.get("source", ""),
                                               f"{state['stamp']}_{state['link_idx']}")
+        elif state.get("kind") == "news_img":
+            # 뉴스 카드지만 배경은 사용자가 준 이미지로
+            paths = render_carousel(card, art, state.get("extras") or {},
+                                    f"{state['stamp']}_{state['link_idx']}",
+                                    background=state["bg_image"])
         else:
             paths = render_carousel(card, art, state.get("extras") or {},
                                     f"{state['stamp']}_{state['link_idx']}")
@@ -1179,6 +1230,12 @@ def handle_message(tg: TelegramClient, chat_id: int, text: str):
         handle_compare(tg, chat_id, content)
     elif mode == "community":
         handle_community(tg, chat_id, content)
+    elif mode == "card_image":
+        tg.send_message(chat_id,
+                        "🖼 '카드이미지'는 배경으로 쓸 이미지를 사진으로 보내면서, "
+                        "그 사진 캡션에 '카드이미지 [기사 링크]' 를 함께 적어주세요.\n"
+                        "예) 사진 캡션: 카드이미지 https://n.news...\n"
+                        "→ 그 이미지를 배경으로, 링크 내용으로 뉴스 카드를 만들어요.")
     elif mode == "logo":
         tg.send_message(chat_id,
                         "🖼 로고를 등록하려면, 로고 이미지(PNG 권장)를 '로고' 라는 캡션과 함께 "
@@ -1390,6 +1447,9 @@ def main():
             if mode == "logo":
                 # '로고' 캡션이 달린 사진 — 회사 로고로 저장 (공고 내용 분석에는 안 씀)
                 _save_chat_logo(tg, cid, g["file_ids"])
+            elif mode == "card_image":
+                # '카드이미지 [링크]' 캡션 사진 — 이 이미지를 배경으로 뉴스 카드 생성
+                _start_work(tg, cid, handle_card_with_image, rest, g["file_ids"])
             elif mode == "job":
                 _start_work(tg, cid, handle_job_photos, rest, g["file_ids"])
             elif cid in PENDING_COMMUNITY:

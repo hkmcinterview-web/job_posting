@@ -532,12 +532,15 @@ def _slide_context(background, context: str, page: int, source: str,
     return img.convert("RGB")
 
 
-def render_carousel(card: dict, article: dict, extras: dict, out_prefix: str) -> list:
+def render_carousel(card: dict, article: dict, extras: dict, out_prefix: str,
+                    background: Image.Image = None) -> list:
     """캐러셀 1~4장 렌더링. 1장은 후킹(기존 스타일), 2~4장은 같은 사진의
-    블러+어둡게 배경 위에 요약/인사이트/면접활용. AI 데이터가 없는 장은 건너뜀."""
+    블러+어둡게 배경 위에 요약/인사이트/면접활용. AI 데이터가 없는 장은 건너뜀.
+    background 를 넘기면 기사 사진 대신 그 이미지를 배경으로 쓴다(사용자 제공 이미지)."""
     config.CARDS_DIR.mkdir(parents=True, exist_ok=True)
     extras = extras or {}
-    background = load_backgrounds(article, 1)[0]
+    if background is None:
+        background = load_backgrounds(article, 1)[0]
     source = (article or {}).get("source") or (article or {}).get("site", "")
 
     slides = [_draw_card(card, background, source, 0, 1)]   # 1장 — 후킹
