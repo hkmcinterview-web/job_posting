@@ -150,8 +150,10 @@ def _fetch_one_image(url: str, referer: str) -> Image.Image:
                 img = bigger
                 break
 
-    cropped, _scale = _cover_crop(img)
-    return cropped
+    # 여기서 잘라 채우지 않고 원본 비율 그대로 반환한다.
+    # 실제 배경 배치(cover/contain)는 _prepare_bg 가 프레임 비율에 맞춰 처리해서,
+    # 로고 등 가장자리의 중요한 부분이 잘리지 않게 한다.
+    return img
 
 
 def load_backgrounds(article: dict, count: int) -> list:
