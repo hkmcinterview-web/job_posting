@@ -327,12 +327,14 @@ view = view.sort_values(["company", "employment_type", "title"], kind="stable")
 st.markdown(f"**{len(view)}건** 표시 중")
 
 cols = ["company", "title", "employment_type", "job_family", "location", "deadline"]
-st.dataframe(
+st.caption("👇 아래 표에서 공고 행을 클릭하면 상세 내용이 표시됩니다.")
+event = st.dataframe(
     view[cols].rename(columns={
         "company": "기업", "title": "직무", "employment_type": "채용구분",
         "job_family": "직군", "location": "근무지", "deadline": "마감일",
     }),
     use_container_width=True, hide_index=True,
+    on_select="rerun", selection_mode="single-row", key="job_table",
 )
 
 # ── 유튜브 홍보 배너 (전체공고 ↔ 상세보기 사이) ──
@@ -341,10 +343,16 @@ youtube_banner()
 st.divider()
 st.subheader("📄 상세 보기")
 if len(view):
-    idx = list(view.index)
-    labels = view.apply(lambda r: f"[{r['company']}] {r['title']} · {r['employment_type']}", axis=1).tolist()
-    pick = st.selectbox("공고 선택", options=idx, format_func=lambda i: labels[idx.index(i)])
-    render_posting(view.loc[pick])
+    try:
+        sel_rows = event.selection["rows"]
+    except Exception:
+        sel_rows = []
+    if sel_rows:
+        pos = min(sel_rows[0], len(view) - 1)
+    else:
+        pos = 0
+        st.caption("표에서 공고를 클릭하지 않아 첫 번째 공고를 표시하고 있어요.")
+    render_posting(view.iloc[pos])
 else:
     st.info("조건에 맞는 공고가 없습니다.")
 
