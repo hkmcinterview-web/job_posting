@@ -96,8 +96,13 @@ CSS = """
 """
 
 
-@st.cache_data
-def load_data():
+def _data_mtime():
+    return DATA_FILE.stat().st_mtime if DATA_FILE.exists() else 0.0
+
+
+@st.cache_data(ttl=300)
+def load_data(_mtime=0.0):
+    # _mtime 인자는 data.json 이 바뀌면 캐시를 자동 무효화시키기 위한 키입니다.
     if not DATA_FILE.exists():
         return pd.DataFrame()
     recs = json.loads(DATA_FILE.read_text(encoding="utf-8"))
@@ -279,7 +284,7 @@ st.caption("자동차산업 채용공고를 기업별로 모아 보관합니다.
 spec_banner()
 kakao_banner()
 
-df = load_data()
+df = load_data(_data_mtime())
 if df.empty:
     st.warning("data.json 을 찾을 수 없습니다. app.py 와 같은 폴더에 data.json 을 두세요.")
     st.stop()
