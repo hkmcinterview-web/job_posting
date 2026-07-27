@@ -37,10 +37,17 @@ CSS = """
 .metrics .m {flex:1; background:#f1f4f8; border-radius:10px; padding:10px 6px; text-align:center;}
 .metrics .ml {font-size:12px; color:#5b6472; margin-bottom:3px;}
 .metrics .mv {font-size:20px; font-weight:800; color:#10141c;}
+/* 데이터프레임 툴바(CSV 다운로드·검색·전체화면) 숨김 */
+[data-testid="stElementToolbar"]{display:none !important;}
 /* 상세 카드 */
 .job-card {background:#fff; border:1px solid #e7e9ee; border-radius:16px;
   padding:30px 34px; box-shadow:0 2px 14px rgba(20,30,60,.06);
-  line-height:1.75; font-size:16px; color:#1f2430;}
+  line-height:1.75; font-size:16px; color:#1f2430;
+  position:relative; overflow:hidden;}
+.jc-wm {position:absolute; inset:0; z-index:0; pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%27500%27%20height%3D%27340%27%3E%3Ctext%20x%3D%2740%27%20y%3D%27215%27%20font-family%3D%27Apple%20SD%20Gothic%20Neo%2C%20Malgun%20Gothic%2C%20sans-serif%27%20font-size%3D%2726%27%20font-weight%3D%27700%27%20fill%3D%27%230b1a3a%27%20fill-opacity%3D%270.045%27%20transform%3D%27rotate%28-30%20250%20200%29%27%3E%EA%B3%B5%EB%8C%80%EC%83%9D%ED%98%84%EC%A7%81%EC%9E%90%20%EC%9E%A1%EC%95%A4%EC%9C%A0%3C/text%3E%3C/svg%3E");
+  background-repeat:repeat;}
+.jc-body {position:relative; z-index:1;}
 .job-card .company {color:#5b6472; font-size:14px; font-weight:600;}
 .job-card .title {font-size:26px; font-weight:800; margin:4px 0 14px; color:#10141c; line-height:1.3;}
 .job-card .badges {display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;}
@@ -185,8 +192,10 @@ def render_posting(row):
         badges.append(f'<span class="badge dday">🗓 마감 {_html.escape(str(row["deadline"]))}</span>')
     head = (f'<div class="company">{comp}</div><div class="title">{title}</div>'
             f'<div class="badges">{"".join(badges)}</div><hr/>')
-    st.markdown(f'<div class="job-card">{head}{body_to_html(row.get("body",""))}</div>',
-                unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="job-card"><div class="jc-wm"></div>'
+        f'<div class="jc-body">{head}{body_to_html(row.get("body",""))}</div></div>',
+        unsafe_allow_html=True)
 
 
 BODY_CSS = (
