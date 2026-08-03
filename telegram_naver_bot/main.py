@@ -204,7 +204,21 @@ def handle_cafe(tg: TelegramClient, chat_id: int, content: str):
         return
 
     tg.send_message(chat_id, "⏳ 카페에 글을 올리는 중...")
-    result = post_article(subject, content_html, image_paths=None)
+    try:
+        result = post_article(subject, content_html, image_paths=None)
+    except Exception as e:
+        # 스팸필터(999) 등으로 자동 게시가 막히면 — 실패로 끝내지 말고
+        # '복사해서 카페 웹에 직접 붙여넣을 완성본'을 돌려준다 (웹은 필터가 관대함).
+        if "999" in str(e):
+            tg.send_message(chat_id,
+                            "⚠️ 네이버 스팸필터(999)에 막혀 자동 게시가 안 됐어요.\n"
+                            "아래 제목/본문을 복사해서 카페 앱(웹)에 직접 새 글로 올리면 "
+                            "필터 없이 올라가요. (링크가 많으면 몇 개 줄이면 더 잘 돼요)")
+            tg.send_message(chat_id, f"[제목]\n{subject}")
+            tg.send_message(chat_id, f"[본문]\n{body}")
+        else:
+            tg.send_message(chat_id, f"❌ 카페 게시 실패: {e}")
+        return
     url = result.get("articleUrl") or "(URL 확인 불가)"
     tg.send_message(chat_id, f"✅ 카페 게시 완료!\n제목: {subject}\n{url}")
 
